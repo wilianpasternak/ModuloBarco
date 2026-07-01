@@ -21,17 +21,25 @@ class BleService {
 
   bool get isConnected => _device != null && (_device!.isConnected);
 
-  // UUID comparison: aceita forma curta (ffe0) ou longa (0000ffe0-...)
-  static bool _uuidMatch(String actual, String target) {
-    actual = actual.toLowerCase().replaceAll('-', '');
-    target = target.toLowerCase().replaceAll('-', '');
-    return actual == target || actual.endsWith(target) || target.endsWith(actual);
+  // UUID: extrai os 4 chars do campo 16-bit (posicao 4-8 sem tracos)
+  // Funciona com forma curta "ffe0" e longa "0000ffe0-0000-1000-8000-00805f9b34fb"
+  static bool _uuidMatch(String a, String b) {
+    a = a.toLowerCase().replaceAll('-', '');
+    b = b.toLowerCase().replaceAll('-', '');
+    if (a == b) return true;
+    String s(String u) => u.length >= 8 ? u.substring(4, 8) : u;
+    return s(a) == s(b);
   }
 
   Future<void> connect(BluetoothDevice device) async {
     await device.connect(timeout: const Duration(seconds: 10));
+    // Delay necessario: Android BLE precisa estabilizar antes de discoverServices()
+    // Sem isso, discoverServices() pode retornar lista vazia em Samsung/Xiaomi/etc.
+    await Future.delayed(const Duration(milliseconds: 300));
     _device = device;
     _connectionController.add(true);
+
+    await device.requestMtu(512);
 
     final services = await device.discoverServices();
     for (final s in services) {
@@ -40,7 +48,9 @@ class BleService {
           if (_uuidMatch(c.uuid.toString(), _characteristicUuid)) {
             _characteristic = c;
             await c.setNotifyValue(true);
-            c.onValueReceived.listen(_onData);
+            c.lastValueStream.listen((value) {
+              if (value.isNotEmpty) _onData(value);
+            });
             break;
           }
         }

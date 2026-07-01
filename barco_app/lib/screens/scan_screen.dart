@@ -37,6 +37,7 @@ class _ScanScreenState extends State<ScanScreen> {
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         for (final r in results) {
+          if (r.device.platformName != 'ModuloBarco') continue;
           if (!_results.any((e) => e.device.remoteId == r.device.remoteId)) {
             _results.add(r);
           }
@@ -97,7 +98,7 @@ class _ScanScreenState extends State<ScanScreen> {
           const SizedBox(height: 24),
           Icon(Icons.bluetooth_searching, size: 64, color: Colors.blue.shade300),
           const SizedBox(height: 12),
-          const Text('Procure o módulo HM-10', style: TextStyle(color: Colors.white70, fontSize: 16)),
+          const Text('Procurando ModuloBarco...', style: TextStyle(color: Colors.white70, fontSize: 16)),
           const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: _scanning ? null : _startScan,

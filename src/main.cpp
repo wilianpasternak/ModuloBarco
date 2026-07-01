@@ -1020,21 +1020,20 @@ void loop() {
   //         TELEMETRIA BLE (500ms)
   //         $lat,lon,hdg,spd,dist,brg,anc,pwm,nrt\n
   // ========================================================
-  if (gps.location.isValid() && (millis() - lastTelemetryTime) >= 500) {
+  if (bleConnected && (millis() - lastTelemetryTime) >= 500) {
     lastTelemetryTime = millis();
-    if (bleConnected) {
-      String tel = "$";
-      tel += String(gps.location.lat(), 7); tel += ",";
-      tel += String(gps.location.lng(), 7); tel += ",";
-      tel += String(heading, 1);             tel += ",";
-      tel += String(gps.speed.kmph(), 2);    tel += ",";
-      tel += String(anchorMode ? distancia : 0.0, 2); tel += ",";
-      tel += String(anchorMode ? bearingFiltered : 0.0, 1); tel += ",";
-      tel += String(anchorMode ? 1 : 0);     tel += ",";
-      tel += String(pwmComHeading);           tel += ",";
-      tel += String(northMode  ? 1 : 0);      tel += "\n";
-      bleSend(tel);
-    }
+    bool gpsOk = gps.location.isValid() && gps.location.age() < 3000;
+    String tel = "$";
+    tel += String(gpsOk ? gps.location.lat() : 0.0, 7); tel += ",";
+    tel += String(gpsOk ? gps.location.lng() : 0.0, 7); tel += ",";
+    tel += String(heading, 1);                            tel += ",";
+    tel += String(gpsOk ? gps.speed.kmph() : 0.0, 2);   tel += ",";
+    tel += String(anchorMode ? distancia : 0.0, 2);      tel += ",";
+    tel += String(anchorMode ? bearingFiltered : 0.0, 1);tel += ",";
+    tel += String(anchorMode ? 1 : 0);                   tel += ",";
+    tel += String(pwmComHeading);                        tel += ",";
+    tel += String(northMode ? 1 : 0);                    tel += "\n";
+    bleSend(tel);
   }
 
   // ========================================================
