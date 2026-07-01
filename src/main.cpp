@@ -1,35 +1,64 @@
 // ================= DEFINES =================
-//#define USE_NRF     // Comente = bancada (botao pino 4); Descomente = radio NRF24L01
-#define LOG_ENABLE    // Habilita debug via Serial 115200
-//#define TYPE_BRAGA
+//#define USE_NRF     // Descomente para ativar radio NRF24L01
+#define LOG_ENABLE    // Habilita debug via Serial
+//#define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
+#include <Arduino.h>
 #include <Wire.h>
-#include <EEPROM.h>
-#include <SoftwareSerial.h>
+#include <Preferences.h>
 #include <TinyGPS++.h>
 #include <HMC5883L.h>
-#include <Arduino.h>
+#include <NimBLEDevice.h>
 #ifdef USE_NRF
   #include <SPI.h>
   #include <nRF24L01.h>
   #include <RF24.h>
 #endif
 
-// ================= HARDWARE FIXO =================
-SoftwareSerial Serial2(7, 8);   // GPS: RX=7 TX=8
-const int left       = 5;       // PWM giro esquerda
-const int right      = 6;       // PWM giro direita
-const int acelerador = 3;       // PWM helice
-const int buz        = 2;       // buzzer
-#ifdef TYPE_BRAGA
-  const int up   = 0;
-  const int down = 1;
+// ================= BLE UUIDs =================
+#define BLE_SVC_UUID "0000ffe0-0000-1000-8000-00805f9b34fb"
+#define BLE_CHR_UUID "0000ffe1-0000-1000-8000-00805f9b34fb"
+
+// ================= PINOS — ESP32 DevKit Classic =================
+const int left       = 2;    // PWM giro esquerda  (LEDC)
+const int right      = 4;    // PWM giro direita   (LEDC)
+const int acelerador = 33;   // PWM helice         (LEDC)
+const int pinUp      = 12;   // Subir (digital HIGH=ativo) ⚠️ strapping pin: sem pull-up externo
+const int pinDown    = 13;   // Descer (digital HIGH=ativo)
+#define GPS_RX_PIN   16
+#define GPS_TX_PIN   17
+#define I2C_SDA_PIN  21
+#define I2C_SCL_PIN  22
+#ifdef USE_BUZZER
+  const int buz = 25;        // Buzzer placeholder — ajuste o pino conforme hardware
 #endif
+#ifndef USE_NRF
+  const int PIN_BTN_ANCORA = 27;
+#endif
+#ifdef USE_NRF
+  #define NRF_CE_PIN   14    // CE
+  #define NRF_CSN_PIN  15    // CSN / SS
+  #define NRF_SCK_PIN  18    // VSPI SCK
+  #define NRF_MISO_PIN 19    // VSPI MISO
+  #define NRF_MOSI_PIN 23    // VSPI MOSI
+#endif
+
+// ================= LEDC (ESP32 v2.x) =================
+#define LEDC_CH_LEFT  0
+#define LEDC_CH_RIGHT 1
+#define LEDC_CH_ACEL  2
+
+inline void motorWrite(int pin, int val) {
+  if      (pin == left)  ledcWrite(LEDC_CH_LEFT,  val);
+  else if (pin == right) ledcWrite(LEDC_CH_RIGHT, val);
+  else                   ledcWrite(LEDC_CH_ACEL,  val);
+}
 
 // ================= HARDWARE CONDICIONAL =================
 #ifdef USE_NRF
-  RF24 radio(9, 10);
+  SPIClass vspiNrf(VSPI);
+  RF24 radio(NRF_CE_PIN, NRF_CSN_PIN);
   const byte address[6] = "00001";
   #define MAX_CONTROLES 5
   uint32_t controlesMem[MAX_CONTROLES];
@@ -39,7 +68,6 @@ const int buz        = 2;       // buzzer
   long tempoLigadoGiro   = 0;
   long tempoLigadoUpDown = 0;
 #else
-  const int PIN_BTN_ANCORA       = 4;    // INPUT_PULLUP: pressionar = GND
   unsigned long lastBtnPress     = 0;
   const unsigned long debounceMs = 400;
 #endif
@@ -47,6 +75,13 @@ const int buz        = 2;       // buzzer
 // ================= OBJETOS =================
 TinyGPSPlus gps;
 HMC5883L    compass;
+Preferences prefs;
+
+// ================= BLE =================
+NimBLECharacteristic* pBleChar    = nullptr;
+bool                  bleConnected = false;
+bool                  pendingHmnNotify = false;
+unsigned long         hmnNotifyTime   = 0;
 
 // ================= ESTADOS =================
 bool anchorMode  = false;
@@ -56,9 +91,6 @@ bool motorLigado = false;
 // ================= ANCORA =================
 double anchorLat = 0;
 double anchorLon = 0;
-// anchorStopDistance  = zona morta (helice para, integral preservado)
-// anchorStartDistance = helice liga acima disto
-// giroMinDist         = igual ao start: elimina zona onde helice liga sem giro
 const double anchorStopDistance  = 1.0;
 const double anchorStartDistance = 1.5;
 const double giroMinDist         = 1.5;
@@ -67,28 +99,30 @@ int    pwmComHeading   = 0;
 bool   apontaNorteMode = false;
 double bearingFiltered = 0;
 bool   bearingReady    = false;
-double lastDist        = -1;   // -1 = sentinela: primeira leitura GPS
-double driftRate       = 0.0;  // m/s: positivo=afastando, negativo=aproximando
-double anchorHeadError = 0.0;  // atualizado pelo ciclo de giro (100ms)
-const int pwmHeliceMin = 15;
+double lastDist        = -1;
+double driftRate       = 0.0;
+double anchorHeadError = 0.0;
+int    pwmHeliceMin    = 0;    // carregado da NVS no boot; default 0
+int    pwmMotorOff     = 0;    // pwmHeliceMin - 5: pre-carga no ESC sem girar (manual desligado)
 const int pwmRampStep  = 20;
 int       pwmRampAtual = 0;
-unsigned long anchorStartTime = 0;  // para tempo decorrido no debug
+unsigned long anchorStartTime = 0;
 
 // ================= HEADING =================
 float heading           = 0;
 long  lastCompassReaded = 0;
 long  updateGiro        = 0;
-long  buzzerLast        = 10;
-bool  buzzerAtivo       = false;
+#ifdef USE_BUZZER
+  long buzzerLast  = 10;
+  bool buzzerAtivo = false;
+#endif
 const double headingDeadzone = 8.0;
 float northHeadingTarget     = 0;
 
 // ================= PID DISTANCIA =================
-double Kp_dist = 1.0, Ki_dist = 0.5, Kd_dist = 0.8;
+double Kp_dist = 18.0, Ki_dist = 0.3, Kd_dist = 2.0;
 double distIntegral = 0, lastDistError = 0;
-const int pwmMin = 10;
-const int pwmMax = 170;
+const int pwmMax = 255;
 double pwmFiltered = 0;
 
 // ================= PID HEADING (modo norte) =================
@@ -98,27 +132,36 @@ double headIntegral = 0, lastHeadError = 0;
 // ================= PID GIRO =================
 double Kp_giro = 3.0, Ki_giro = 0.1, Kd_giro = 0.0;
 double giroIntegral = 0, lastGiroError = 0;
-const int    pwmGiroMin  = 110;
-const int    pwmGiroMax  = 255;
-const double zonaForte   = 40.0;
-const int    pwmFinoMax  = 130;
-const int    pwmForteMin = 180;
+const int    pwmGiroMin  = 150;
+const int    pwmGiroMax  = 240;
+const double zonaForte   = 220.0;
+const int    pwmFinoMax  = 150;
+const int    pwmForteMin = 220;
 unsigned long lastGiroTime = 0;
 
 // ================= CONTROLE =================
 int           aceleracao  = 0;
 unsigned long lastGPSTime = 0;
 
-// ================= DEBUG TIMERS =================
+// ================= HOLD BLE =================
+bool          giroDir   = false;
+bool          giroEsq   = false;
+bool          upAtivo   = false;
+bool          downAtivo = false;
+unsigned long lastGiroCmdTime   = 0;
+unsigned long lastUpDownCmdTime = 0;
+const unsigned long holdTimeout = 300;  // ms sem novo comando para parar
+
+// ================= TELEMETRIA / BUFFER RX =================
+unsigned long lastTelemetryTime = 0;
+String        bleCmdBuffer      = "";
+
+// ================= DEBUG =================
 #ifdef LOG_ENABLE
   unsigned long lastStatusPrint = 0;
-  unsigned long lastGiroPrint   = 0;
 #endif
 
-// ================= EEPROM BUSSOLA =================
-#define EEPROM_COMPASS_FLAG 100
-#define EEPROM_COMPASS_XOFF 104
-#define EEPROM_COMPASS_YOFF 108
+// ================= BUSSOLA =================
 float compassXOffset = 0;
 float compassYOffset = 0;
 
@@ -143,10 +186,15 @@ struct HeadingKalman {
 };
 HeadingKalman kfHeading;
 
-// ================= EEPROM CONTROLES (apenas USE_NRF) =================
+// ================= NVS CONTROLES (USE_NRF) =================
 #ifdef USE_NRF
-void carregarControlesEEPROM() {
-  for (int i = 0; i < MAX_CONTROLES; i++) EEPROM.get(i * 4, controlesMem[i]);
+void carregarControlesNVS() {
+  prefs.begin("barco", true);
+  for (int i = 0; i < MAX_CONTROLES; i++) {
+    String key = "ctrl" + String(i);
+    controlesMem[i] = prefs.getUInt(key.c_str(), 0);
+  }
+  prefs.end();
 }
 bool controleAutorizado(uint32_t id) {
   for (int i = 0; i < MAX_CONTROLES; i++)
@@ -155,72 +203,111 @@ bool controleAutorizado(uint32_t id) {
 }
 void salvarControle(uint8_t slot, uint32_t id) {
   controlesMem[slot] = id;
-  EEPROM.put(slot * 4, id);
-  for (int i = 0; i <= slot; i++) {
-    digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); delay(200);
-  }
+  prefs.begin("barco", false);
+  String key = "ctrl" + String(slot);
+  prefs.putUInt(key.c_str(), id);
+  prefs.end();
+  #ifdef USE_BUZZER
+    for (int i = 0; i <= slot; i++) {
+      digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); delay(200);
+    }
+  #endif
 }
 #endif
 
-// ================= BUSSOLA =================
+// ================= BUSSOLA — leitura direta HMC5883L =================
+// Evita readRegister8() bloqueante (while(!Wire.available()){}) da biblioteca
+static bool hmc5883l_readRaw(float &fx, float &fy) {
+  Wire.beginTransmission(0x1E);
+  Wire.write(0x03);
+  if (Wire.endTransmission(false) != 0) return false;
+  uint8_t n = Wire.requestFrom((uint8_t)0x1E, (uint8_t)6, (uint8_t)true);
+  if (n < 6) return false;
+  int16_t rx = ((int16_t)Wire.read() << 8) | Wire.read();
+  Wire.read(); Wire.read();  // Z ignorado
+  int16_t ry = ((int16_t)Wire.read() << 8) | Wire.read();
+  fx = rx * 0.92f;
+  fy = ry * 0.92f;
+  return true;
+}
+
 void carregarCalibracaoBussola() {
-  byte flag;
-  EEPROM.get(EEPROM_COMPASS_FLAG, flag);
-  if (flag == 0xAA) {
-    EEPROM.get(EEPROM_COMPASS_XOFF, compassXOffset);
-    EEPROM.get(EEPROM_COMPASS_YOFF, compassYOffset);
+  prefs.begin("barco", true);
+  bool hasCalib = prefs.getBool("compCalib", false);
+  if (hasCalib) {
+    compassXOffset = prefs.getFloat("compXoff", 0.0f);
+    compassYOffset = prefs.getFloat("compYoff", 0.0f);
     #ifdef LOG_ENABLE
-      Serial.print(F("  Bussola: calibracao EEPROM OK (Xoff="));
-      Serial.print(compassXOffset, 2);
-      Serial.print(F(" Yoff=")); Serial.print(compassYOffset, 2);
-      Serial.println(F(")"));
+      Serial.print(F("  Bussola NVS: Xoff=")); Serial.print(compassXOffset, 2);
+      Serial.print(F(" Yoff="));               Serial.println(compassYOffset, 2);
     #endif
   } else {
     #ifdef LOG_ENABLE
-      Serial.println(F("  Bussola: SEM calibracao salva!"));
+      Serial.println(F("  Bussola: SEM calibracao salva"));
     #endif
   }
+  prefs.end();
 }
 
 void calibrarBussola() {
+  #ifdef LOG_ENABLE
+    Serial.println(F("\n[CALIBRACAO] Iniciando — gira motor 360 em cada sentido"));
+  #endif
   float minX = 9999, maxX = -9999, minY = 9999, maxY = -9999;
-  digitalWrite(buz, HIGH);
+  #ifdef USE_BUZZER
+    digitalWrite(buz, HIGH);
+  #endif
   long t0 = millis();
-  analogWrite(left, 200); analogWrite(right, 0);
-  while (millis() - t0 < 8000) {
-    Vector m = compass.readNormalize();
-    minX = min(minX, m.XAxis); maxX = max(maxX, m.XAxis);
-    minY = min(minY, m.YAxis); maxY = max(maxY, m.YAxis);
+  motorWrite(left, 140); motorWrite(right, 0);
+  while (millis() - t0 < 9500) {
+    float mx, my;
+    if (hmc5883l_readRaw(mx, my)) {
+      minX = min(minX, mx); maxX = max(maxX, mx);
+      minY = min(minY, my); maxY = max(maxY, my);
+    }
     delay(50);
   }
-  analogWrite(left, 0); analogWrite(right, 0);
-  digitalWrite(buz, LOW); delay(1000);
-  digitalWrite(buz, HIGH);
-  analogWrite(left, 0); analogWrite(right, 200);
+  motorWrite(left, 0); motorWrite(right, 0);
+  #ifdef USE_BUZZER
+    digitalWrite(buz, LOW); delay(1000);
+    digitalWrite(buz, HIGH);
+  #endif
   t0 = millis();
-  while (millis() - t0 < 8000) {
-    Vector m = compass.readNormalize();
-    minX = min(minX, m.XAxis); maxX = max(maxX, m.XAxis);
-    minY = min(minY, m.YAxis); maxY = max(maxY, m.YAxis);
+  motorWrite(left, 0); motorWrite(right, 140);
+  while (millis() - t0 < 9500) {
+    float mx, my;
+    if (hmc5883l_readRaw(mx, my)) {
+      minX = min(minX, mx); maxX = max(maxX, mx);
+      minY = min(minY, my); maxY = max(maxY, my);
+    }
     delay(50);
   }
-  analogWrite(left, 0); analogWrite(right, 0);
-  digitalWrite(buz, LOW); delay(1000);
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
-  }
+  motorWrite(left, 0); motorWrite(right, 0);
+  #ifdef USE_BUZZER
+    digitalWrite(buz, LOW); delay(1000);
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
+    }
+  #endif
   compassXOffset = (maxX + minX) / 2.0f;
   compassYOffset = (maxY + minY) / 2.0f;
-  EEPROM.put(EEPROM_COMPASS_XOFF, compassXOffset);
-  EEPROM.put(EEPROM_COMPASS_YOFF, compassYOffset);
-  byte flag = 0xAA;
-  EEPROM.put(EEPROM_COMPASS_FLAG, flag);
+  prefs.begin("barco", false);
+  prefs.putFloat("compXoff", compassXOffset);
+  prefs.putFloat("compYoff", compassYOffset);
+  prefs.putBool("compCalib", true);
+  prefs.end();
+  #ifdef LOG_ENABLE
+    Serial.print(F("[CALIBRACAO] OK — Xoff=")); Serial.print(compassXOffset, 2);
+    Serial.print(F(" Yoff=")); Serial.print(compassYOffset, 2);
+    Serial.println(F(" (salvo NVS)"));
+  #endif
 }
 
 float readCompassCalibrado() {
-  Vector norm = compass.readNormalize();
-  float x = norm.XAxis - compassXOffset;
-  float y = norm.YAxis - compassYOffset;
+  float nx, ny;
+  if (!hmc5883l_readRaw(nx, ny)) return heading;
+  float x = nx - compassXOffset;
+  float y = ny - compassYOffset;
   float h = atan2(y, x) * 180.0f / PI;
   if (h < 0) h += 360.0f;
   return h;
@@ -247,11 +334,13 @@ double getBearing(double lat1, double lon1, double lat2, double lon2) {
 }
 
 // ================= BUZZER =================
+#ifdef USE_BUZZER
 void beep(int) {
   digitalWrite(buz, HIGH);
-  buzzerLast = millis();
+  buzzerLast  = millis();
   buzzerAtivo = true;
 }
+#endif
 
 // ================= PID GIRO =================
 int calcPidGiro(double erro) {
@@ -266,6 +355,25 @@ int calcPidGiro(double erro) {
   int piso = (abs(erro) >= zonaForte) ? pwmForteMin : pwmGiroMin;
   int teto = (abs(erro) >= zonaForte) ? pwmGiroMax  : pwmFinoMax;
   return constrain((int)abs(pidOut), piso, teto);
+}
+
+// ================= HELPERS HOLD =================
+void pararGiro() {
+  giroDir = false; giroEsq = false;
+  motorWrite(left, 0); motorWrite(right, 0);
+}
+
+void pararUpDown() {
+  upAtivo = false; downAtivo = false;
+  digitalWrite(pinUp, LOW); digitalWrite(pinDown, LOW);
+}
+
+// ================= HELPER BLE SEND =================
+void bleSend(const String& s) {
+  if (bleConnected && pBleChar) {
+    pBleChar->setValue((uint8_t*)s.c_str(), s.length());
+    pBleChar->notify();
+  }
 }
 
 // ================= ATIVAR ANCORA =================
@@ -297,33 +405,28 @@ void ativarAncora() {
     distancia       = 0.0;
     anchorStartTime = millis();
     #ifdef LOG_ENABLE
-      Serial.println();
-      Serial.println(F("============================================"));
-      Serial.println(F("            ANCORA ATIVADA"));
-      Serial.print(F("  Ponto: Lat ")); Serial.println(lat, 7);
-      Serial.print(F("         Lon ")); Serial.println(lon, 7);
-      Serial.print(F("  GPS age   : ")); Serial.print(gps.location.age()); Serial.println(F(" ms"));
-      Serial.print(F("  Satelites : ")); Serial.println(gps.satellites.value());
-      Serial.println(F("============================================"));
-      Serial.println();
+      Serial.println(F("\n========== ANCORA ATIVADA =========="));
+      Serial.print(F("  GPS age : ")); Serial.print(gps.location.age());
+      Serial.print(F(" ms  |  Sats: ")); Serial.println(gps.satellites.value());
+      Serial.println(F("=====================================\n"));
     #endif
-    digitalWrite(buz, HIGH); delay(300);
-    digitalWrite(buz, LOW);  delay(100);
-    digitalWrite(buz, HIGH); delay(300);
-    digitalWrite(buz, LOW);
+    #ifdef USE_BUZZER
+      digitalWrite(buz, HIGH); delay(300);
+      digitalWrite(buz, LOW);  delay(100);
+      digitalWrite(buz, HIGH); delay(300);
+      digitalWrite(buz, LOW);
+    #endif
   } else {
     #ifdef LOG_ENABLE
-      Serial.println();
       Serial.println(F("[ERRO] GPS invalido - ancora NAO ativada"));
-      Serial.print(F("  isValid  : ")); Serial.println(gps.location.isValid() ? F("sim") : F("nao"));
-      Serial.print(F("  age      : ")); Serial.print(gps.location.age()); Serial.println(F(" ms (max 2000)"));
-      Serial.print(F("  lat      : ")); Serial.println(lat, 7);
-      Serial.print(F("  lon      : ")); Serial.println(lon, 7);
-      Serial.println();
+      Serial.print(F("  isValid: ")); Serial.println(gps.location.isValid() ? F("sim") : F("nao"));
+      Serial.print(F("  age    : ")); Serial.print(gps.location.age()); Serial.println(F(" ms"));
     #endif
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(buz, HIGH); delay(80); digitalWrite(buz, LOW); delay(80);
-    }
+    #ifdef USE_BUZZER
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(buz, HIGH); delay(80); digitalWrite(buz, LOW); delay(80);
+      }
+    #endif
   }
 }
 
@@ -331,12 +434,10 @@ void ativarAncora() {
 void desativarAncora() {
   #ifdef LOG_ENABLE
     float elapsed = (millis() - anchorStartTime) / 1000.0f;
-    Serial.println();
-    Serial.println(F("============================================"));
+    Serial.println(F("\n============================================"));
     Serial.println(F("            ANCORA DESATIVADA"));
     Serial.print(F("  Tempo ativo: ")); Serial.print(elapsed, 1); Serial.println(F(" s"));
-    Serial.println(F("============================================"));
-    Serial.println();
+    Serial.println(F("============================================\n"));
   #endif
   anchorMode      = false;
   distIntegral    = 0;
@@ -350,76 +451,321 @@ void desativarAncora() {
   lastDist        = -1;
   driftRate       = 0.0;
   anchorHeadError = 0.0;
-  analogWrite(acelerador, 0);
-  analogWrite(left,  0);
-  analogWrite(right, 0);
-  digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW);
+  motorWrite(acelerador, 0);
+  motorWrite(left,  0);
+  motorWrite(right, 0);
+  #ifdef USE_BUZZER
+    digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW);
+  #endif
 }
+
+// ================= PROCESSAMENTO DE COMANDOS BLE =================
+void processBlecmd(const String& cmd) {
+  // --- Ancora ---
+  if (cmd == "$ANC") {
+    if (!anchorMode) ativarAncora(); else desativarAncora();
+  }
+  // --- Norte ---
+  else if (cmd == "$NRT") {
+    northMode = !northMode;
+    anchorMode = false;
+    if (northMode) {
+      northHeadingTarget = heading;
+      giroIntegral = 0; lastGiroError = 0; lastGiroTime = millis();
+      #ifdef USE_BUZZER
+        digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW);
+      #endif
+    } else {
+      giroIntegral = 0; lastGiroError = 0; headIntegral = 0; lastHeadError = 0;
+      if (motorLigado) motorWrite(acelerador, 0);
+      #ifdef USE_BUZZER
+        digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW);
+      #endif
+    }
+  }
+  // --- Motor ON/OFF ---
+  else if (cmd == "$MOT") {
+    motorLigado = !motorLigado;
+    if (motorLigado) {
+      if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
+      motorWrite(acelerador, aceleracao);
+    } else {
+      motorWrite(acelerador, pwmMotorOff);
+    }
+  }
+  // --- Aceleracao ---
+  else if (cmd == "$ACE+") {
+    aceleracao = constrain(aceleracao + 5, 0, 255);
+    if (motorLigado) motorWrite(acelerador, aceleracao);
+  }
+  else if (cmd == "$ACE-") {
+    int minAcel = motorLigado ? pwmHeliceMin : 0;
+    aceleracao = constrain(aceleracao - 5, minAcel, 255);
+    if (motorLigado) motorWrite(acelerador, aceleracao);
+  }
+  // --- Giro direita ---
+  else if (cmd == "$GTR+") {
+    if (!anchorMode) {
+      giroDir = true; giroEsq = false;
+      motorWrite(right, 230); motorWrite(left, 0);
+      lastGiroCmdTime = millis();
+    }
+  }
+  else if (cmd == "$GTR-") {
+    giroDir = false;
+    if (!giroEsq) { motorWrite(right, 0); motorWrite(left, 0); }
+  }
+  // --- Giro esquerda ---
+  else if (cmd == "$GTL+") {
+    if (!anchorMode) {
+      giroEsq = true; giroDir = false;
+      motorWrite(left, 230); motorWrite(right, 0);
+      lastGiroCmdTime = millis();
+    }
+  }
+  else if (cmd == "$GTL-") {
+    giroEsq = false;
+    if (!giroDir) { motorWrite(left, 0); motorWrite(right, 0); }
+  }
+  // --- Subir ---
+  else if (cmd == "$UPP+") {
+    upAtivo = true; downAtivo = false;
+    digitalWrite(pinUp, HIGH); digitalWrite(pinDown, LOW);
+    lastUpDownCmdTime = millis();
+  }
+  else if (cmd == "$UPP-") {
+    upAtivo = false;
+    if (!downAtivo) digitalWrite(pinUp, LOW);
+  }
+  // --- Descer ---
+  else if (cmd == "$DWN+") {
+    downAtivo = true; upAtivo = false;
+    digitalWrite(pinDown, HIGH); digitalWrite(pinUp, LOW);
+    lastUpDownCmdTime = millis();
+  }
+  else if (cmd == "$DWN-") {
+    downAtivo = false;
+    if (!upAtivo) digitalWrite(pinDown, LOW);
+  }
+  // --- PWM Helice Minimo ---
+  else if (cmd == "$HMN+") {
+    pwmHeliceMin = constrain(pwmHeliceMin + 1, 0, 255);
+    pwmMotorOff  = max(0, pwmHeliceMin - 5);
+    motorWrite(acelerador, pwmHeliceMin);
+    prefs.begin("barco", false);
+    prefs.putInt("pwmHelMin",   pwmHeliceMin);
+    prefs.putInt("pwmMotorOff", pwmMotorOff);
+    prefs.end();
+    bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
+  }
+  else if (cmd == "$HMN-") {
+    pwmHeliceMin = constrain(pwmHeliceMin - 1, 0, 255);
+    pwmMotorOff  = max(0, pwmHeliceMin - 5);
+    motorWrite(acelerador, pwmHeliceMin);
+    prefs.begin("barco", false);
+    prefs.putInt("pwmHelMin",   pwmHeliceMin);
+    prefs.putInt("pwmMotorOff", pwmMotorOff);
+    prefs.end();
+    bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
+  }
+  // --- Calibrar bussola ---
+  else if (cmd == "$CAL") {
+    calibrarBussola();
+  }
+}
+
+// ================= BLE CALLBACKS =================
+class BleServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer*) override {
+    bleConnected = true;
+    // Envia pwmHeliceMin apos 500ms (aguarda subscribe do app)
+    pendingHmnNotify = true;
+    hmnNotifyTime    = millis();
+  }
+  void onDisconnect(NimBLEServer* s) override {
+    bleConnected = false;
+    pararGiro();
+    pararUpDown();
+    s->startAdvertising();
+  }
+};
+
+class BleCharCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* c) override {
+    std::string val = c->getValue();
+    for (size_t i = 0; i < val.length(); i++) {
+      char ch = val[i];
+      if (ch == '\n') {
+        bleCmdBuffer.trim();
+        processBlecmd(bleCmdBuffer);
+        bleCmdBuffer = "";
+      } else if (ch != '\r') {
+        bleCmdBuffer += ch;
+      }
+    }
+  }
+};
 
 // ================= SETUP =================
 void setup() {
   #ifdef LOG_ENABLE
     Serial.begin(115200);
-    delay(100);
+    unsigned long _t = millis();
+    while (!Serial && millis() - _t < 3000) delay(10);
     Serial.println();
     Serial.println(F("========================================"));
-    Serial.println(F("      MODULO BARCO  -  firmware v1.0"));
+    Serial.println(F("      MODULO BARCO  —  firmware v2.0"));
+    Serial.println(F("      Plataforma : ESP32 DevKit Classic"));
     #ifdef USE_NRF
-      Serial.println(F("      Modo compilado : RADIO NRF24L01"));
+      Serial.println(F("      Modo : BLE + RADIO NRF24L01"));
     #else
-      Serial.println(F("      Modo compilado : BANCADA (botao)"));
+      Serial.println(F("      Modo : BLE + botao fisico"));
     #endif
-    Serial.println(F("      Debug           : ATIVO | 115200 baud"));
     Serial.println(F("========================================"));
     Serial.println(F("Iniciando..."));
   #endif
 
-  Serial2.begin(9600);
-  Wire.begin();
+  // --- NVS: carrega configuracoes persistidas ---
+  prefs.begin("barco", true);
+  pwmHeliceMin = prefs.getInt("pwmHelMin",   0);
+  pwmMotorOff  = prefs.getInt("pwmMotorOff", 0);
+  prefs.end();
+  #ifdef LOG_ENABLE
+    Serial.print(F("  pwmHeliceMin : ")); Serial.print(pwmHeliceMin);
+    Serial.print(F("  pwmMotorOff  : ")); Serial.println(pwmMotorOff);
+  #endif
+
+  // --- GPS ---
+  #ifdef LOG_ENABLE
+    Serial.println(F("[1] GPS Serial..."));
+  #endif
+  Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+
+  // --- Wire / I2C ---
+  #ifdef LOG_ENABLE
+    Serial.println(F("[2] Wire / Pinos..."));
+  #endif
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setTimeout(100);
+
+  // --- Pinos de saida ---
   pinMode(left,       OUTPUT);
   pinMode(right,      OUTPUT);
   pinMode(acelerador, OUTPUT);
-  pinMode(buz,        OUTPUT);
-  #ifdef TYPE_BRAGA
-    pinMode(up,   OUTPUT);
-    pinMode(down, OUTPUT);
+  pinMode(pinUp,      OUTPUT);
+  pinMode(pinDown,    OUTPUT);
+  digitalWrite(pinUp,   LOW);
+  digitalWrite(pinDown, LOW);
+  #ifdef USE_BUZZER
+    pinMode(buz, OUTPUT);
   #endif
 
+  // --- LEDC ---
+  ledcSetup(LEDC_CH_LEFT,  5000, 8); ledcAttachPin(left,       LEDC_CH_LEFT);
+  ledcSetup(LEDC_CH_RIGHT, 5000, 8); ledcAttachPin(right,      LEDC_CH_RIGHT);
+  ledcSetup(LEDC_CH_ACEL,  5000, 8); ledcAttachPin(acelerador, LEDC_CH_ACEL);
+
+  #ifdef LOG_ENABLE
+    Serial.println(F("  I2C scan:"));
+    for (uint8_t addr = 1; addr < 127; addr++) {
+      Wire.beginTransmission(addr);
+      if (Wire.endTransmission() == 0) {
+        Serial.print(F("    0x"));
+        if (addr < 16) Serial.print(F("0"));
+        Serial.println(addr, HEX);
+      }
+    }
+  #endif
+
+  // --- NRF24L01 ---
   #ifdef USE_NRF
-    radio.begin();
+    #ifdef LOG_ENABLE
+      Serial.println(F("[3] NRF24L01 (VSPI CE=14 CSN=15 SCK=18 MISO=19 MOSI=23)..."));
+    #endif
+    vspiNrf.begin(NRF_SCK_PIN, NRF_MISO_PIN, NRF_MOSI_PIN, NRF_CSN_PIN);
+    radio.begin(&vspiNrf);
     radio.openReadingPipe(0, address);
     radio.setDataRate(RF24_250KBPS);
     radio.startListening();
-    carregarControlesEEPROM();
+    carregarControlesNVS();
     bootTime = millis();
     #ifdef LOG_ENABLE
-      Serial.println(F("  NRF24L01      : OK"));
+      Serial.println(F("  NRF24L01 : OK"));
     #endif
   #else
     pinMode(PIN_BTN_ANCORA, INPUT_PULLUP);
     #ifdef LOG_ENABLE
-      Serial.print(F("  Botao ancora  : pino "));
-      Serial.print(PIN_BTN_ANCORA);
-      Serial.println(F(" [INPUT_PULLUP - pressionar = ativar/desativar]"));
+      Serial.print(F("  Botao ancora : GPIO ")); Serial.print(PIN_BTN_ANCORA);
+      Serial.println(F(" [INPUT_PULLUP]"));
     #endif
   #endif
 
-  compass.setRange(HMC5883L_RANGE_1_3GA);
-  compass.setMeasurementMode(HMC5883L_CONTINOUS);
-  compass.setDataRate(HMC5883L_DATARATE_30HZ);
-  compass.setSamples(HMC5883L_SAMPLES_8);
-  compass.setOffset(0, 0, 0);
-  carregarCalibracaoBussola();
-
+  // --- HMC5883L ---
   #ifdef LOG_ENABLE
-    Serial.println(F("  GPS           : aguardando fix..."));
-    Serial.println(F("  HMC5883L      : OK"));
+    Serial.println(F("[4] HMC5883L..."));
+  #endif
+  Wire.beginTransmission(0x1E);
+  bool compassPresent = (Wire.endTransmission() == 0);
+  if (compassPresent) {
+    // Escrita direta nos registradores — evita readRegister8 bloqueante da biblioteca
+    Wire.beginTransmission(0x1E); Wire.write(0x00); Wire.write(0x74); Wire.endTransmission();
+    Wire.beginTransmission(0x1E); Wire.write(0x01); Wire.write(0x20); Wire.endTransmission();
+    Wire.beginTransmission(0x1E); Wire.write(0x02); Wire.write(0x00); Wire.endTransmission();
+    compass.setOffset(0, 0, 0);
+    carregarCalibracaoBussola();
+    #ifdef LOG_ENABLE
+      Serial.println(F("  HMC5883L : OK"));
+    #endif
+  } else {
+    #ifdef LOG_ENABLE
+      Serial.print(F("  HMC5883L : NAO ENCONTRADO (SDA=")); Serial.print(I2C_SDA_PIN);
+      Serial.print(F(" SCL=")); Serial.print(I2C_SCL_PIN); Serial.println(F(")"));
+    #endif
+  }
+
+  // --- NimBLE ---
+  #ifdef LOG_ENABLE
+    Serial.println(F("[5] NimBLE..."));
+  #endif
+  NimBLEDevice::init("ModuloBarco");
+  NimBLEServer*  pServer  = NimBLEDevice::createServer();
+  pServer->setCallbacks(new BleServerCallbacks());
+  NimBLEService* pService = pServer->createService(BLE_SVC_UUID);
+  pBleChar = pService->createCharacteristic(
+    BLE_CHR_UUID,
+    NIMBLE_PROPERTY::READ    |
+    NIMBLE_PROPERTY::WRITE   |
+    NIMBLE_PROPERTY::NOTIFY  |
+    NIMBLE_PROPERTY::WRITE_NR
+  );
+  pBleChar->setCallbacks(new BleCharCallbacks());
+  pService->start();
+  NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
+  pAdv->addServiceUUID(BLE_SVC_UUID);
+  pAdv->start();
+  #ifdef LOG_ENABLE
+    Serial.println(F("  NimBLE : advertising 'ModuloBarco'"));
     Serial.println(F("Pronto.\n"));
   #endif
 
-  for (int i = 0; i < 2; i++) {
-    digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
-  }
+  #ifdef USE_BUZZER
+    for (int i = 0; i < 2; i++) {
+      digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
+    }
+    // Calibracao via botao fisico na inicializacao (sem NRF)
+    #ifndef USE_NRF
+      if (digitalRead(PIN_BTN_ANCORA) == LOW) {
+        #ifdef LOG_ENABLE
+          Serial.println(F("[CALIBRACAO] Botao pressionado na inicializacao"));
+        #endif
+        for (int i = 0; i < 3; i++) {
+          digitalWrite(buz, HIGH); delay(100); digitalWrite(buz, LOW); delay(100);
+        }
+        delay(500);
+        calibrarBussola();
+      }
+    #endif
+  #endif
 }
 
 // ================= LOOP =================
@@ -427,14 +773,22 @@ void loop() {
 
   // --- Bussola Kalman (50ms) ---
   if ((millis() - lastCompassReaded) > 50) {
-    heading = kfHeading.update(readCompassCalibrado());
+    heading           = kfHeading.update(readCompassCalibrado());
     lastCompassReaded = millis();
   }
 
   // --- Buzzer one-shot ---
-  if (buzzerAtivo && (millis() - buzzerLast) > 10) {
-    digitalWrite(buz, LOW);
-    buzzerAtivo = false;
+  #ifdef USE_BUZZER
+    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+      digitalWrite(buz, LOW);
+      buzzerAtivo = false;
+    }
+  #endif
+
+  // --- Notificacao HMN apos conexao (aguarda 500ms para subscribe) ---
+  if (pendingHmnNotify && bleConnected && (millis() - hmnNotifyTime) > 500) {
+    pendingHmnNotify = false;
+    bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
   }
 
   // --- GPS ---
@@ -444,7 +798,6 @@ void loop() {
   //              ENTRADA DE COMANDOS
   // ========================================================
   #ifdef USE_NRF
-  // ---- Cadastro timeout ----
   if (millis() - bootTime > cadastroTimeout) modoCadastro = false;
 
   if (radio.available()) {
@@ -454,7 +807,6 @@ void loop() {
     memcpy(idStr, &text[12], 5); idStr[5] = '\0';
     uint32_t controlID = (uint32_t)atoi(idStr);
 
-    // --- Modo cadastro ---
     if (modoCadastro) {
       if      (text[0]=='1'){ salvarControle(0,controlID); modoCadastro=false; delay(2000); return; }
       else if (text[1]=='1'){ salvarControle(1,controlID); modoCadastro=false; delay(2000); return; }
@@ -469,66 +821,73 @@ void loop() {
       return;
     }
 
-    // --- Validacao ---
     if (!controleAutorizado(controlID)) {
-      for (int i=0;i<6;i++){ digitalWrite(buz,HIGH); delay(30); digitalWrite(buz,LOW); delay(30); }
+      #ifdef USE_BUZZER
+        for (int i=0;i<6;i++){ digitalWrite(buz,HIGH); delay(30); digitalWrite(buz,LOW); delay(30); }
+      #endif
       return;
     }
 
     char *cmd = &text[0];
-    beep(0);
+    #ifdef USE_BUZZER
+      beep(0);
+    #endif
 
-    // Ancora
     if (cmd[7]=='1' && !northMode) {
       if (!anchorMode) ativarAncora(); else desativarAncora();
       delay(300); return;
     }
-    // Norte
     if (cmd[8]=='1' && !anchorMode) {
       northMode = !northMode; anchorMode = false;
       if (northMode) {
         northHeadingTarget=heading; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
-        digitalWrite(buz,HIGH); delay(300); digitalWrite(buz,LOW);
+        #ifdef USE_BUZZER
+          digitalWrite(buz,HIGH); delay(300); digitalWrite(buz,LOW);
+        #endif
       } else {
         giroIntegral=0; lastGiroError=0; headIntegral=0; lastHeadError=0;
-        digitalWrite(buz,HIGH); delay(700); digitalWrite(buz,LOW);
-        if (motorLigado) analogWrite(acelerador,0);
+        if (motorLigado) motorWrite(acelerador,0);
+        #ifdef USE_BUZZER
+          digitalWrite(buz,HIGH); delay(700); digitalWrite(buz,LOW);
+        #endif
       }
       delay(300); return;
     }
-    // Controles modo norte
     if (northMode) {
-      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; motorLigado=true; analogWrite(acelerador,aceleracao); }
-      if (cmd[4]=='1' && aceleracao>0)  { aceleracao-=3; if(motorLigado) analogWrite(acelerador,aceleracao); }
-      if (cmd[0]=='1'){ motorLigado=!motorLigado; analogWrite(acelerador,motorLigado?aceleracao:0); }
+      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; if(motorLigado) motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[0]=='1'){
+        motorLigado=!motorLigado;
+        if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
+        else { motorWrite(acelerador, pwmMotorOff); }
+      }
     }
-    // Controles modo manual
     if (!anchorMode && !northMode) {
-      if (cmd[0]=='1'){ motorLigado=!motorLigado; analogWrite(acelerador,motorLigado?aceleracao:0); }
-      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; motorLigado=true; analogWrite(acelerador,aceleracao); }
-      if (cmd[4]=='1' && aceleracao>0)  { aceleracao-=3; motorLigado=true; analogWrite(acelerador,aceleracao); }
-      if      (cmd[1]=='1'){ analogWrite(left,230); analogWrite(right,0);  tempoLigadoGiro=millis(); }
-      else if (cmd[2]=='1'){ analogWrite(right,230); analogWrite(left,0);  tempoLigadoGiro=millis(); }
-      #ifdef TYPE_BRAGA
-        if (cmd[5]=='1'){ digitalWrite(up,HIGH); digitalWrite(down,LOW);  tempoLigadoUpDown=millis(); }
-        if (cmd[6]=='1'){ digitalWrite(up,LOW);  digitalWrite(down,HIGH); tempoLigadoUpDown=millis(); }
-      #endif
+      if (cmd[0]=='1'){
+        motorLigado=!motorLigado;
+        if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
+        else { motorWrite(acelerador, pwmMotorOff); }
+      }
+      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[1]=='1'){ motorWrite(left,230); motorWrite(right,0); tempoLigadoGiro=millis(); }
+      else if (cmd[2]=='1'){ motorWrite(right,230); motorWrite(left,0); tempoLigadoGiro=millis(); }
+      if (cmd[5]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
+      if (cmd[6]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
     }
-  } // radio.available
+  }
 
-  // Timeouts manuais
-  #ifdef TYPE_BRAGA
-    if (!anchorMode && !northMode && (millis()-tempoLigadoUpDown)>150){
-      digitalWrite(up,LOW); digitalWrite(down,LOW); tempoLigadoUpDown=millis();
-    }
-  #endif
-  if (!anchorMode && !northMode && (millis()-tempoLigadoGiro)>150){
-    analogWrite(left,0); analogWrite(right,0); tempoLigadoGiro=millis();
+  // Timeouts hold NRF
+  if (!anchorMode && !northMode && (millis()-tempoLigadoUpDown) > 150) {
+    digitalWrite(pinUp,LOW); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis();
+  }
+  if (!anchorMode && !northMode && (millis()-tempoLigadoGiro) > 150) {
+    motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis();
   }
 
   #else
   // ========================================================
-  //         MODO BANCADA — botao na pino 4
+  //         MODO SEM NRF — botao fisico
   // ========================================================
   if (digitalRead(PIN_BTN_ANCORA) == LOW && (millis() - lastBtnPress) > debounceMs) {
     lastBtnPress = millis();
@@ -536,26 +895,36 @@ void loop() {
     delay(300);
   }
 
-  // Status periodico quando ancora desligada (a cada 2s)
   #ifdef LOG_ENABLE
     if (!anchorMode && (millis() - lastStatusPrint) > 2000) {
       lastStatusPrint = millis();
-      Serial.print(F("[STATUS] Heading: ")); Serial.print(heading, 1); Serial.print(F(" deg  |  GPS: "));
+      Serial.print(F("[STATUS] Hdg:")); Serial.print(heading, 1);
+      Serial.print(F(" BLE:")); Serial.print(bleConnected ? F("OK") : F("--"));
+      Serial.print(F(" GPS:"));
       if (gps.location.isValid() && gps.location.age() < 5000) {
-        Serial.print(F("FIX OK  age=")); Serial.print(gps.location.age());
-        Serial.print(F("ms  sats=")); Serial.print(gps.satellites.value());
-        Serial.print(F("  Lat:")); Serial.print(gps.location.lat(), 7);
-        Serial.print(F("  Lon:")); Serial.println(gps.location.lng(), 7);
+        Serial.print(F("FIX age=")); Serial.print(gps.location.age());
+        Serial.print(F("ms sats=")); Serial.print(gps.satellites.value());
+        Serial.print(F(" Lat:")); Serial.print(gps.location.lat(), 6);
+        Serial.print(F(" Lon:")); Serial.println(gps.location.lng(), 6);
       } else {
-        Serial.print(F("SEM FIX  chars=")); Serial.println(gps.charsProcessed());
+        Serial.print(F("SEM FIX chars=")); Serial.println(gps.charsProcessed());
       }
     }
   #endif
-
   #endif // USE_NRF
 
   // ========================================================
-  //         ANCORA — CICLO GPS (500 ms)
+  //         TIMEOUTS BLE HOLD — seguranca
+  // ========================================================
+  if ((giroDir || giroEsq) && (millis() - lastGiroCmdTime) > holdTimeout) {
+    pararGiro();
+  }
+  if ((upAtivo || downAtivo) && (millis() - lastUpDownCmdTime) > holdTimeout) {
+    pararUpDown();
+  }
+
+  // ========================================================
+  //         ANCORA — CICLO GPS (500ms)
   // ========================================================
   if (anchorMode && gps.location.isValid()) {
     long now = millis();
@@ -569,11 +938,9 @@ void loop() {
       double bearing = getBearing(curLat, curLon, anchorLat, anchorLon);
       distancia = dist;
 
-      // Velocidade de deriva
       if (lastDist < 0) { lastDist = dist; driftRate = 0.0; }
-      else { driftRate = (dist - lastDist) / dt_pid; lastDist = dist; }
+      else              { driftRate = (dist - lastDist) / dt_pid; lastDist = dist; }
 
-      // Filtro exponencial no bearing
       if (!bearingReady) {
         bearingFiltered = bearing; bearingReady = true;
       } else {
@@ -585,11 +952,9 @@ void loop() {
         if (bearingFiltered >= 360.0) bearingFiltered -= 360.0;
       }
 
-      // Erro preditivo: antecipa onde barco estara em ~0.8s se afastando
       double driftContrib = constrain(driftRate * 0.8, 0.0, 2.0);
       double distError    = dist + driftContrib;
 
-      // PID distancia com anti-windup que preserva memoria ambiental
       distIntegral += distError * dt_pid;
       double windupCap = (dist * 25.0 > 80.0) ? dist * 25.0 : 80.0;
       distIntegral = constrain(distIntegral, 0.0, windupCap);
@@ -597,16 +962,12 @@ void loop() {
       lastDistError = distError;
 
       bool zonamorta = (dist < anchorStopDistance);
-      int pwmAlvo;
+      int  pwmAlvo;
 
       if (zonamorta) {
-        // Zona morta: so o integral sustenta o barco (memoria do vento/corrente)
-        // distIntegral NAO e zerado — preserva o aprendizado ambiental
         int holdPwm = constrain((int)(Ki_dist * distIntegral), 0, pwmHeliceMin * 3);
         pwmAlvo     = holdPwm;
-        pwmFiltered = (double)holdPwm;
       } else {
-        // PID completo fora da zona morta
         double pidDist = Kp_dist * distError + Ki_dist * distIntegral + Kd_dist * distDerivative;
         int pwm = constrain((int)pidDist, 0, pwmMax);
         double alpha = (pwm < (int)pwmFiltered) ? 0.4 : 0.75;
@@ -615,63 +976,69 @@ void loop() {
         if (pwmAlvo > 0 && pwmAlvo < pwmHeliceMin) pwmAlvo = pwmHeliceMin;
       }
 
-      // Rampa de segurança
       if (pwmAlvo == 0) pwmRampAtual = 0;
       else if (pwmRampAtual < pwmAlvo) pwmRampAtual = min(pwmRampAtual + pwmRampStep, pwmAlvo);
       else pwmRampAtual = pwmAlvo;
 
-      // Direcao primeiro: bloqueia empuxo se motor desalinhado (exceto zona morta)
-      bool motorAlinhado = zonamorta || (bearingReady && abs(anchorHeadError) <= 30.0);
+      bool motorAlinhado = zonamorta || (bearingReady && abs(anchorHeadError) <= 18.0);
       pwmComHeading = motorAlinhado ? pwmRampAtual : 0;
-      analogWrite(acelerador, pwmComHeading);
+      motorWrite(acelerador, pwmComHeading);
 
-      // ---- DEBUG CICLO GPS ----
       #ifdef LOG_ENABLE
         float elapsed = (millis() - anchorStartTime) / 1000.0f;
-
-        const char *zonaStr   = zonamorta                  ? "ZONA MORTA (<1m)"
-                              : (dist < giroMinDist)       ? "APROXIMANDO (1-1.5m)"
-                                                           : "CORRECAO ATIVA (>1.5m)";
-
-        const char *driftStr  = (driftRate >  0.05)        ? "afastando  >"
-                              : (driftRate < -0.05)        ? "< aproximando"
-                                                           : "~ estavel";
-
-        const char *headStr   = (abs(anchorHeadError) <= headingDeadzone) ? "ALINHADO"
-                              : (abs(anchorHeadError) <= 30.0)            ? "alinhando..."
-                                                                          : "DESALINHADO";
-
-        const char *heliceStr = (pwmComHeading > 0)                       ? "LIGADA"
-                              : (zonamorta && pwmAlvo > 0)                ? "HOLDING (zona morta)"
-                              : (!motorAlinhado)                           ? "AGUARD. ALINHAMENTO"
-                                                                          : "PARADA";
-
-        Serial.println(F("--------------------------------------------------"));
-        Serial.print(F(" ANCORA  t=")); Serial.print(elapsed, 1); Serial.println(F("s"));
-        Serial.println(F("--------------------------------------------------"));
-        Serial.print(F("  Posicao atual : Lat ")); Serial.print(curLat, 7);
-        Serial.print(F("   Lon ")); Serial.println(curLon, 7);
-        Serial.print(F("  Ponto ancora  : Lat ")); Serial.print(anchorLat, 7);
-        Serial.print(F("   Lon ")); Serial.println(anchorLon, 7);
-        Serial.println();
-        Serial.print(F("  Distancia     : ")); Serial.print(dist, 2); Serial.print(F(" m   [")); Serial.print(zonaStr); Serial.println(F("]"));
-        Serial.print(F("  Deriva        : ")); Serial.print(driftRate, 2); Serial.print(F(" m/s  ")); Serial.println(driftStr);
-        Serial.println();
-        Serial.print(F("  Bearing alvo  : ")); Serial.print(bearingFiltered, 1); Serial.println(F(" deg  (direcao p/ ponto ancora)"));
-        Serial.print(F("  Motor aponta  : ")); Serial.print(heading, 1); Serial.println(F(" deg  (bussola Kalman)"));
-        Serial.print(F("  Erro direcao  : ")); Serial.print(anchorHeadError, 1); Serial.print(F(" deg   [")); Serial.print(headStr); Serial.println(F("]"));
-        Serial.println();
-        Serial.print(F("  PWM alvo      : ")); Serial.println(pwmAlvo);
-        Serial.print(F("  PWM rampa     : ")); Serial.println(pwmRampAtual);
-        Serial.print(F("  Helice        : [")); Serial.print(heliceStr); Serial.println(F("]"));
-        Serial.print(F("  Integral dist : ")); Serial.print(distIntegral, 1); Serial.println(F("  (memoria ambiental)"));
-        Serial.println();
+        const char *zonaStr  = zonamorta           ? "MORT" : (dist < giroMinDist) ? "APRO" : "CORR";
+        const char *driftStr = (driftRate >  0.05) ? ">afa" : (driftRate < -0.05)  ? "<apr" : "~est";
+        const char *giroStr  = (distancia < giroMinDist)                 ? "PROX"
+                             : (abs(anchorHeadError) <= headingDeadzone) ? "ALIN"
+                             : (anchorHeadError > 0)                     ? "GIR.D" : "GIR.E";
+        const char *helStr   = (pwmComHeading > 0)        ? "LIGA"
+                             : (zonamorta && pwmAlvo > 0) ? "HOLD"
+                             : (!motorAlinhado)            ? "AGUA" : "PARA";
+        const char *headStr  = (abs(anchorHeadError) <= headingDeadzone) ? "ok"
+                             : (abs(anchorHeadError) <= 30.0)            ? "alin" : "DSAL";
+        Serial.print(F("\r["));        Serial.print(elapsed, 1);
+        Serial.print(F("s] D:"));     Serial.print(dist, 2);
+        Serial.print(F("m["));        Serial.print(zonaStr);
+        Serial.print(F("] Dr:"));     Serial.print(driftRate, 2);
+        Serial.print(driftStr);
+        Serial.print(F(" | G:"));     Serial.print(bearingFiltered, 1);
+        Serial.print(F("/"));         Serial.print(heading, 1);
+        Serial.print(F(" err="));     Serial.print(anchorHeadError, 1);
+        Serial.print(F("["));         Serial.print(giroStr);
+        Serial.print(F("] | H:"));    Serial.print(pwmComHeading);
+        Serial.print(F("("));         Serial.print(pwmRampAtual);
+        Serial.print(F("/"));         Serial.print(pwmAlvo);
+        Serial.print(F(")["));        Serial.print(helStr);
+        Serial.print(F("] I:"));      Serial.print(distIntegral, 1);
+        Serial.print(F("["));         Serial.print(headStr);
+        Serial.print(F("]      \r"));
       #endif
     }
   }
 
   // ========================================================
-  //         ANCORA — CICLO GIRO (100 ms)
+  //         TELEMETRIA BLE (500ms)
+  //         $lat,lon,hdg,spd,dist,brg,anc,pwm,nrt\n
+  // ========================================================
+  if (gps.location.isValid() && (millis() - lastTelemetryTime) >= 500) {
+    lastTelemetryTime = millis();
+    if (bleConnected) {
+      String tel = "$";
+      tel += String(gps.location.lat(), 7); tel += ",";
+      tel += String(gps.location.lng(), 7); tel += ",";
+      tel += String(heading, 1);             tel += ",";
+      tel += String(gps.speed.kmph(), 2);    tel += ",";
+      tel += String(anchorMode ? distancia : 0.0, 2); tel += ",";
+      tel += String(anchorMode ? bearingFiltered : 0.0, 1); tel += ",";
+      tel += String(anchorMode ? 1 : 0);     tel += ",";
+      tel += String(pwmComHeading);           tel += ",";
+      tel += String(northMode  ? 1 : 0);      tel += "\n";
+      bleSend(tel);
+    }
+  }
+
+  // ========================================================
+  //         ANCORA — CICLO GIRO (100ms)
   // ========================================================
   if (anchorMode && bearingReady && (millis() - updateGiro) > 100) {
     if (distancia >= giroMinDist) {
@@ -680,45 +1047,19 @@ void loop() {
       if (anchorHeadError < -180.0) anchorHeadError += 360.0;
 
       if (abs(anchorHeadError) <= headingDeadzone) {
-        analogWrite(left, 0); analogWrite(right, 0);
+        motorWrite(left, 0); motorWrite(right, 0);
         giroIntegral = 0;
-        #ifdef LOG_ENABLE
-          if (millis() - lastGiroPrint > 500) {
-            lastGiroPrint = millis();
-            Serial.print(F("[GIRO] Alinhado  erro=")); Serial.print(anchorHeadError, 1);
-            Serial.println(F(" deg  - motor parado"));
-          }
-        #endif
       } else {
         int pwmGiro = calcPidGiro(anchorHeadError);
-        if (anchorHeadError > 0) {
-          analogWrite(right, pwmGiro); analogWrite(left, 0);
-          #ifdef LOG_ENABLE
-            if (millis() - lastGiroPrint > 200) {
-              lastGiroPrint = millis();
-              Serial.print(F("[GIRO] Erro: +")); Serial.print(anchorHeadError, 1);
-              Serial.print(F(" deg  -> GIRANDO DIREITA   PWM: ")); Serial.println(pwmGiro);
-            }
-          #endif
-        } else {
-          analogWrite(left, pwmGiro); analogWrite(right, 0);
-          #ifdef LOG_ENABLE
-            if (millis() - lastGiroPrint > 200) {
-              lastGiroPrint = millis();
-              Serial.print(F("[GIRO] Erro: ")); Serial.print(anchorHeadError, 1);
-              Serial.print(F(" deg  -> GIRANDO ESQUERDA  PWM: ")); Serial.println(pwmGiro);
-            }
-          #endif
-        }
+        if (anchorHeadError > 0) { motorWrite(right, pwmGiro); motorWrite(left,  0); }
+        else                     { motorWrite(left,  pwmGiro); motorWrite(right, 0); }
       }
     }
-    // Perto do ponto (dist < giroMinDist): motor permanece na ultima posicao
-    // conhecida apontando ao ponto ancora — nao sobrescreve o giro
     updateGiro = millis();
   }
 
   // ========================================================
-  //         MODO NORTE — ciclo continuo
+  //         MODO NORTE
   // ========================================================
   if (northMode) {
     double error = northHeadingTarget - (double)heading;
@@ -731,29 +1072,29 @@ void loop() {
     lastHeadError = error;
     double pidOut = Kp_head * error + Ki_head * headIntegral + Kd_head * deriv;
     if (abs(error) <= headingDeadzone) {
-      digitalWrite(left, LOW); digitalWrite(right, LOW); giroIntegral = 0;
+      motorWrite(left, 0); motorWrite(right, 0); giroIntegral = 0;
     } else {
       int pwmGiro = calcPidGiro(error);
-      if (pidOut > 0) { analogWrite(right, pwmGiro); analogWrite(left,  0); }
-      else            { analogWrite(left,  pwmGiro); analogWrite(right, 0); }
+      if (pidOut > 0) { motorWrite(right, pwmGiro); motorWrite(left,  0); }
+      else            { motorWrite(left,  pwmGiro); motorWrite(right, 0); }
     }
   }
 
-  delay(20);
-
   // ========================================================
-  //         APONTA NORTE (ativado via cadastro)
+  //         APONTA NORTE (ativado via NRF cadastro)
   // ========================================================
   if (apontaNorteMode && !anchorMode && !northMode) {
     double erroNorte = 0.0 - (double)heading;
     if (erroNorte >  180.0) erroNorte -= 360.0;
     if (erroNorte < -180.0) erroNorte += 360.0;
     if (abs(erroNorte) <= headingDeadzone) {
-      analogWrite(left, 0); analogWrite(right, 0); giroIntegral = 0;
+      motorWrite(left, 0); motorWrite(right, 0); giroIntegral = 0;
     } else {
       int pwmGiro = calcPidGiro(erroNorte);
-      if (erroNorte > 0) { analogWrite(right, pwmGiro); analogWrite(left,  0); }
-      else               { analogWrite(left,  pwmGiro); analogWrite(right, 0); }
+      if (erroNorte > 0) { motorWrite(right, pwmGiro); motorWrite(left,  0); }
+      else               { motorWrite(left,  pwmGiro); motorWrite(right, 0); }
     }
   }
+
+  delay(20);
 }

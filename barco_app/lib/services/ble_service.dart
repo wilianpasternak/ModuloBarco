@@ -1,0 +1,115 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import '../models/telemetry.dart';
+
+const _serviceUuid        = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const _characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
+
+class BleService {
+  BluetoothDevice? _device;
+  BluetoothCharacteristic? _characteristic;
+  String _lineBuffer = '';
+
+  final _telemetryController  = StreamController<Telemetry>.broadcast();
+  final _connectionController = StreamController<bool>.broadcast();
+  final _pwmHelMinController  = StreamController<int>.broadcast();
+
+  Stream<Telemetry> get telemetryStream  => _telemetryController.stream;
+  Stream<bool>      get connectionStream => _connectionController.stream;
+  Stream<int>       get pwmHelMinStream  => _pwmHelMinController.stream;
+
+  bool get isConnected => _device != null && (_device!.isConnected);
+
+  Future<void> connect(BluetoothDevice device) async {
+    await device.connect(timeout: const Duration(seconds: 10));
+    _device = device;
+    _connectionController.add(true);
+
+    final services = await device.discoverServices();
+    for (final s in services) {
+      if (s.uuid.toString().toLowerCase() == _serviceUuid) {
+        for (final c in s.characteristics) {
+          if (c.uuid.toString().toLowerCase() == _characteristicUuid) {
+            _characteristic = c;
+            await c.setNotifyValue(true);
+            c.lastValueStream.listen(_onData);
+            break;
+          }
+        }
+      }
+    }
+
+    device.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _characteristic = null;
+        _connectionController.add(false);
+      }
+    });
+  }
+
+  void _onData(List<int> bytes) {
+    _lineBuffer += utf8.decode(bytes, allowMalformed: true);
+    while (true) {
+      final idx = _lineBuffer.indexOf('\n');
+      if (idx < 0) break;
+      final line = _lineBuffer.substring(0, idx).trim();
+      _lineBuffer = _lineBuffer.substring(idx + 1);
+      if (line.startsWith('\$HMN:')) {
+        // Resposta de configuracao do pwmHeliceMin
+        final val = int.tryParse(line.substring(5));
+        if (val != null) _pwmHelMinController.add(val);
+      } else if (line.startsWith('\$')) {
+        final t = Telemetry.fromLine(line);
+        if (t != null) _telemetryController.add(t);
+      }
+    }
+  }
+
+  Future<void> sendCommand(String cmd) async {
+    if (_characteristic == null) return;
+    final bytes = utf8.encode(cmd.endsWith('\n') ? cmd : '$cmd\n');
+    await _characteristic!.write(bytes, withoutResponse: true);
+  }
+
+  // --- Ancora / Norte / Motor ---
+  Future<void> sendToggleAnchor()  => sendCommand('\$ANC');
+  Future<void> sendToggleNorth()   => sendCommand('\$NRT');
+  Future<void> sendToggleMotor()   => sendCommand('\$MOT');
+
+  // --- Giro (press/release) ---
+  Future<void> sendGiroDirStart()  => sendCommand('\$GTR+');
+  Future<void> sendGiroDirStop()   => sendCommand('\$GTR-');
+  Future<void> sendGiroEsqStart()  => sendCommand('\$GTL+');
+  Future<void> sendGiroEsqStop()   => sendCommand('\$GTL-');
+
+  // --- Subir / Descer (press/release) ---
+  Future<void> sendUpStart()       => sendCommand('\$UPP+');
+  Future<void> sendUpStop()        => sendCommand('\$UPP-');
+  Future<void> sendDownStart()     => sendCommand('\$DWN+');
+  Future<void> sendDownStop()      => sendCommand('\$DWN-');
+
+  // --- Aceleracao (discreto — app envia repetidamente enquanto pressionado) ---
+  Future<void> sendAcelPlus()      => sendCommand('\$ACE+');
+  Future<void> sendAcelMinus()     => sendCommand('\$ACE-');
+
+  // --- Configuracao pwmHeliceMin ---
+  Future<void> sendPwmHelMinPlus()  => sendCommand('\$HMN+');
+  Future<void> sendPwmHelMinMinus() => sendCommand('\$HMN-');
+
+  // --- Calibrar bussola ---
+  Future<void> sendCalibrate()     => sendCommand('\$CAL');
+
+  Future<void> disconnect() async {
+    await _device?.disconnect();
+    _device = null;
+    _characteristic = null;
+    _connectionController.add(false);
+  }
+
+  void dispose() {
+    _telemetryController.close();
+    _connectionController.close();
+    _pwmHelMinController.close();
+  }
+}
