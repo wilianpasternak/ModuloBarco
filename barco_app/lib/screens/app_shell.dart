@@ -62,15 +62,15 @@ class _AppShellState extends State<AppShell> {
     ];
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1B2A),
+      backgroundColor: const Color(0xFF0F0F08),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1B2A3B),
-        title: Row(
+        backgroundColor: const Color(0xFF1A1A10),
+        title: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.anchor, color: Colors.blue.shade300, size: 20),
-            const SizedBox(width: 8),
-            const Text('Módulo Barco', style: TextStyle(color: Colors.white, fontSize: 16)),
+            Icon(Icons.anchor, color: Color(0xFFD4A800), size: 20),
+            SizedBox(width: 8),
+            Text('Módulo Barco', style: TextStyle(color: Color(0xFFD4A800), fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
           ],
         ),
         centerTitle: true,
@@ -93,7 +93,7 @@ class _AppShellState extends State<AppShell> {
                     border: Border(
                       bottom: BorderSide(
                         color: _selectedIndex == i
-                            ? Colors.blue.shade400
+                            ? const Color(0xFFD4A800)
                             : Colors.transparent,
                         width: 2,
                       ),
@@ -105,16 +105,16 @@ class _AppShellState extends State<AppShell> {
                       Icon(
                         _tabIcons[i],
                         color: _selectedIndex == i
-                            ? Colors.blue.shade400
-                            : Colors.white38,
+                            ? const Color(0xFFD4A800)
+                            : const Color(0xFF6B5400),
                         size: 20,
                       ),
                       Text(
                         _tabLabels[i],
                         style: TextStyle(
                           color: _selectedIndex == i
-                              ? Colors.blue.shade400
-                              : Colors.white38,
+                              ? const Color(0xFFD4A800)
+                              : const Color(0xFF6B5400),
                           fontSize: 10,
                         ),
                       ),
