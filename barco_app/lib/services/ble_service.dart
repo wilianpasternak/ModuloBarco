@@ -21,6 +21,13 @@ class BleService {
 
   bool get isConnected => _device != null && (_device!.isConnected);
 
+  // UUID comparison: aceita forma curta (ffe0) ou longa (0000ffe0-...)
+  static bool _uuidMatch(String actual, String target) {
+    actual = actual.toLowerCase().replaceAll('-', '');
+    target = target.toLowerCase().replaceAll('-', '');
+    return actual == target || actual.endsWith(target) || target.endsWith(actual);
+  }
+
   Future<void> connect(BluetoothDevice device) async {
     await device.connect(timeout: const Duration(seconds: 10));
     _device = device;
@@ -28,12 +35,12 @@ class BleService {
 
     final services = await device.discoverServices();
     for (final s in services) {
-      if (s.uuid.toString().toLowerCase() == _serviceUuid) {
+      if (_uuidMatch(s.uuid.toString(), _serviceUuid)) {
         for (final c in s.characteristics) {
-          if (c.uuid.toString().toLowerCase() == _characteristicUuid) {
+          if (_uuidMatch(c.uuid.toString(), _characteristicUuid)) {
             _characteristic = c;
             await c.setNotifyValue(true);
-            c.lastValueStream.listen(_onData);
+            c.onValueReceived.listen(_onData);
             break;
           }
         }
@@ -69,7 +76,7 @@ class BleService {
   Future<void> sendCommand(String cmd) async {
     if (_characteristic == null) return;
     final bytes = utf8.encode(cmd.endsWith('\n') ? cmd : '$cmd\n');
-    await _characteristic!.write(bytes, withoutResponse: true);
+    await _characteristic!.write(bytes, withoutResponse: false);
   }
 
   // --- Ancora / Norte / Motor ---
