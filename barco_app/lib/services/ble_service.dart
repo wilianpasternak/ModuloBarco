@@ -77,6 +77,11 @@ class BleService {
     }
 
     await BleService.saveDevice(device.remoteId.str);
+
+    // Solicita valores de configuração (HMN, VER) — firmware responde com $HMN:XX e $VER:XX
+    // Delay necessário: firmware pode ainda não ter processado o evento de conexão
+    Future.delayed(const Duration(milliseconds: 700), () => sendCommand('\$CFG?'));
+
     device.connectionState.listen((state) {
       if (state == BluetoothConnectionState.disconnected) {
         _characteristic = null;
@@ -166,15 +171,20 @@ class BleService {
   }
 
   // --- GitHub OTA check ---
+  // Retorna:
+  //   null                          → erro de rede
+  //   {'version': null, 'url': null} → sem releases publicadas (404)
+  //   {'version': '1.x', 'url': '...'} → release encontrada
   Future<Map<String, dynamic>?> checkForUpdate() async {
     try {
       final resp = await http.get(Uri.parse(_githubReleasesApi),
           headers: {'Accept': 'application/vnd.github.v3+json'});
+      if (resp.statusCode == 404) return {'version': null, 'url': null};
       if (resp.statusCode != 200) return null;
       final json = resp.body;
       final tagMatch = RegExp(r'"tag_name":"([^"]+)"').firstMatch(json);
       final urlMatch = RegExp(r'"browser_download_url":"([^"]+\.bin)"').firstMatch(json);
-      if (tagMatch == null || urlMatch == null) return null;
+      if (tagMatch == null || urlMatch == null) return {'version': null, 'url': null};
       return {
         'version': tagMatch.group(1)!.replaceFirst('v', ''),
         'url': urlMatch.group(1)!,

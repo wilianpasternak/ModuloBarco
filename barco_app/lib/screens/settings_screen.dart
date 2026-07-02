@@ -88,13 +88,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _checkForUpdate() async {
     final result = await widget.ble.checkForUpdate();
-    setState(() {
-      _latestVersion = result?['version'];
-      _otaUrl = result?['url'];
-    });
-    if (result == null && mounted) {
+    if (!mounted) return;
+    if (result == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Não foi possível verificar atualizações')));
+        const SnackBar(content: Text('Erro de rede. Verifique sua conexão.')));
+      return;
+    }
+    if (result['version'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nenhuma atualização disponível ainda.')));
+      return;
+    }
+    setState(() {
+      _latestVersion = result['version'] as String;
+      _otaUrl = result['url'] as String;
+    });
+    if (_latestVersion == widget.ble.firmwareVersion) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Você já está na versão mais recente (v$_latestVersion).')));
     }
   }
 

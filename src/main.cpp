@@ -580,6 +580,11 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$CAL") {
     calibrarBussola();
   }
+  // --- Solicitar configuracao atual (app envia apos subscribe para receber HMN e VER) ---
+  else if (cmd == "$CFG?") {
+    bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
+    bleSend("$VER:" + String(FIRMWARE_VERSION) + "\n");
+  }
 }
 
 // ================= OTA CALLBACKS =================

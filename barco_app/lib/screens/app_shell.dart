@@ -15,7 +15,8 @@ const _kPanel   = Color(0xFF1A1A10);
 
 class AppShell extends StatefulWidget {
   final BleService ble;
-  const AppShell({super.key, required this.ble});
+  final bool autoReconnect;
+  const AppShell({super.key, required this.ble, this.autoReconnect = false});
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -28,6 +29,7 @@ class _AppShellState extends State<AppShell> {
   StreamSubscription? _hmnSub;
   bool _isConnected = true;
   bool _isReconnecting = false;
+  bool _manualDisconnect = false;
   int _pwmHelMin = 0;
 
   static const _tabLabels = ['Controle', 'Mapa', 'Config'];
@@ -36,13 +38,22 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    _isConnected = !widget.autoReconnect;
     _telSub  = widget.ble.telemetryStream.listen((t) => setState(() => _tel = t));
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
+    if (widget.autoReconnect) {
+      Future.microtask(_reconnect);
+    }
   }
 
   void _onConnectionChange(bool connected) {
     if (!mounted) return;
+    if (!connected && _manualDisconnect) {
+      _manualDisconnect = false;
+      setState(() { _isConnected = false; _tel = null; });
+      return;
+    }
     setState(() {
       _isConnected = connected;
       if (!connected) _tel = null;
@@ -51,24 +62,18 @@ class _AppShellState extends State<AppShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Conexão com o motor perdida')),
       );
-      // Auto-reconnect after brief delay
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted && !_isConnected) _reconnect();
-      });
     }
   }
 
   Future<void> _disconnect() async {
+    _manualDisconnect = true;
     await widget.ble.disconnect();
-    // _isConnected will update via _onConnectionChange
-    // Do NOT navigate — stay on this screen
   }
 
   Future<void> _reconnect() async {
     if (_isReconnecting) return;
     final savedId = await BleService.getSavedDeviceId();
     if (savedId == null) {
-      // No saved device — go to scan
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ScanScreen()),
@@ -76,12 +81,11 @@ class _AppShellState extends State<AppShell> {
       }
       return;
     }
-    setState(() => _isReconnecting = true);
+    if (mounted) setState(() => _isReconnecting = true);
     try {
-      // Find the saved device from known devices or scan briefly
-      final devices = FlutterBluePlus.connectedDevices;
+      final known = FlutterBluePlus.connectedDevices;
       BluetoothDevice? target;
-      for (final d in devices) {
+      for (final d in known) {
         if (d.remoteId.str == savedId) { target = d; break; }
       }
       target ??= BluetoothDevice(remoteId: DeviceIdentifier(savedId));
@@ -89,7 +93,6 @@ class _AppShellState extends State<AppShell> {
       if (mounted) setState(() { _isConnected = true; _isReconnecting = false; });
     } catch (_) {
       if (mounted) setState(() => _isReconnecting = false);
-      // If reconnect fails, go to scan
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ScanScreen()),
@@ -134,8 +137,8 @@ class _AppShellState extends State<AppShell> {
             actions: [
               IconButton(
                 icon: Icon(
-                  _isConnected ? Icons.link_off : Icons.link,
-                  color: _isConnected ? Colors.white70 : _kGold,
+                  _isConnected ? Icons.wifi : Icons.wifi_off,
+                  color: _isConnected ? Colors.green.shade400 : Colors.red.shade400,
                 ),
                 tooltip: _isConnected ? 'Desconectar' : 'Conectar',
                 onPressed: _isReconnecting
@@ -179,7 +182,6 @@ class _AppShellState extends State<AppShell> {
           ),
           body: IndexedStack(index: _selectedIndex, children: screens),
         ),
-        // Reconnecting overlay
         if (_isReconnecting)
           Container(
             color: Colors.black.withValues(alpha: 0.75),

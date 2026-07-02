@@ -19,6 +19,7 @@ class ScanScreen extends StatefulWidget {
 class _ScanScreenState extends State<ScanScreen> {
   final List<ScanResult> _results = [];
   bool _scanning = false;
+  bool _scanDone = false;
   StreamSubscription? _scanSub;
   String? _bleError;
 
@@ -39,13 +40,19 @@ class _ScanScreenState extends State<ScanScreen> {
   String _deviceName(ScanResult r) {
     if (r.device.platformName.isNotEmpty) return r.device.platformName;
     if (r.advertisementData.advName.isNotEmpty) return r.advertisementData.advName;
-    return 'Desconhecido';
+    return '';
   }
 
   Future<void> _startScan() async {
-    setState(() { _bleError = null; _results.clear(); _scanning = true; });
+    setState(() { _bleError = null; _results.clear(); _scanning = true; _scanDone = false; });
 
-    final btState = await FlutterBluePlus.adapterState.first;
+    // Aguarda estado estável do adaptador (iOS pode retornar 'unknown' transitoriamente)
+    final btState = await FlutterBluePlus.adapterState
+        .where((s) => s != BluetoothAdapterState.unknown)
+        .first
+        .timeout(const Duration(seconds: 3),
+            onTimeout: () => BluetoothAdapterState.unknown);
+
     if (btState != BluetoothAdapterState.on) {
       setState(() {
         _scanning = false;
@@ -61,21 +68,17 @@ class _ScanScreenState extends State<ScanScreen> {
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         for (final r in results) {
+          if (_deviceName(r) != 'BragaPesca') continue;
           if (!_results.any((e) => e.device.remoteId == r.device.remoteId)) {
             _results.add(r);
           }
         }
-        _results.sort((a, b) {
-          final aT = _deviceName(a) == 'BragaPesca' ? 0 : 1;
-          final bT = _deviceName(b) == 'BragaPesca' ? 0 : 1;
-          return aT.compareTo(bT);
-        });
       });
     });
 
     await Future.delayed(const Duration(seconds: 10));
     await FlutterBluePlus.stopScan();
-    setState(() => _scanning = false);
+    setState(() { _scanning = false; _scanDone = true; });
   }
 
   Future<void> _connect(BluetoothDevice device) async {
@@ -89,7 +92,8 @@ class _ScanScreenState extends State<ScanScreen> {
         content: Row(children: [
           const CircularProgressIndicator(color: _kGold),
           const SizedBox(width: 16),
-          Text('Conectando ao motor...', style: TextStyle(color: Colors.white.withValues(alpha: 0.8))),
+          Text('Conectando ao motor...',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.8))),
         ]),
       ),
     );
@@ -117,6 +121,10 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final emptyMessage = _scanDone
+        ? 'Motor não encontrado.\nVerifique se o motor está ligado e próximo.'
+        : '';
+
     return Scaffold(
       backgroundColor: _kDark,
       appBar: AppBar(
@@ -128,7 +136,6 @@ class _ScanScreenState extends State<ScanScreen> {
       body: Column(
         children: [
           const SizedBox(height: 32),
-          // Logo
           Image.asset('assets/logo_braga_pesca.png', height: 110),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -165,31 +172,27 @@ class _ScanScreenState extends State<ScanScreen> {
             child: _results.isEmpty
                 ? Center(
                     child: Text(
-                      _scanning ? '' : 'Nenhum dispositivo encontrado',
-                      style: const TextStyle(color: _kGoldDim),
+                      emptyMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: _kGoldDim, height: 1.6),
                     ),
                   )
                 : ListView.builder(
                     itemCount: _results.length,
                     itemBuilder: (_, i) {
                       final r = _results[i];
-                      final name = _deviceName(r);
-                      final isTarget = name == 'BragaPesca';
                       return Card(
-                        color: isTarget ? const Color(0xFF1A2A10) : _kPanel,
+                        color: const Color(0xFF1A2A10),
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(
-                            color: isTarget ? _kGold : Colors.transparent, width: 1.5),
+                          side: const BorderSide(color: _kGold, width: 1.5),
                         ),
                         child: ListTile(
-                          leading: Icon(Icons.bluetooth,
-                              color: isTarget ? _kGold : Colors.blue.shade300),
-                          title: Text(name, style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: isTarget ? FontWeight.bold : FontWeight.normal,
-                          )),
+                          leading: const Icon(Icons.bluetooth, color: _kGold),
+                          title: const Text('BragaPesca',
+                              style: TextStyle(color: Colors.white,
+                                  fontWeight: FontWeight.bold)),
                           subtitle: Text(r.device.remoteId.toString(),
                               style: const TextStyle(color: _kGoldDim, fontSize: 11)),
                           trailing: Text('${r.rssi} dBm',
