@@ -1,6 +1,18 @@
 #!/bin/bash
 set -e
 
+# Localiza o executável gh (Homebrew não está no PATH do terminal PlatformIO)
+GH=$(command -v gh 2>/dev/null || echo "")
+if [ -z "$GH" ]; then
+  for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh ~/bin/gh; do
+    [ -x "$candidate" ] && GH="$candidate" && break
+  done
+fi
+if [ -z "$GH" ]; then
+  echo "ERRO: gh CLI não encontrado. Instale com: brew install gh"
+  exit 1
+fi
+
 # Lê a versão definida no firmware
 VERSION=$(grep '#define FIRMWARE_VERSION' src/main.cpp | grep -o '"[^"]*"' | tr -d '"')
 
@@ -12,14 +24,14 @@ fi
 echo "==> Versão do firmware: v$VERSION"
 
 # Verifica se a release já existe
-if gh release view "v$VERSION" &>/dev/null; then
+if "$GH" release view "v$VERSION" &>/dev/null; then
   echo "AVISO: Release v$VERSION já existe no GitHub."
   read -p "Deseja substituir? (s/N): " CONFIRM
   if [[ "$CONFIRM" != "s" && "$CONFIRM" != "S" ]]; then
     echo "Cancelado."
     exit 0
   fi
-  gh release delete "v$VERSION" --yes
+  "$GH" release delete "v$VERSION" --yes
 fi
 
 # Compila o firmware
@@ -36,7 +48,7 @@ echo "==> Tamanho do firmware: $(du -h "$BIN" | cut -f1)"
 
 # Cria a release no GitHub e faz upload do .bin
 echo "==> Criando release v$VERSION no GitHub..."
-gh release create "v$VERSION" "$BIN" \
+"$GH" release create "v$VERSION" "$BIN" \
   --title "Firmware Braga Pesca v$VERSION" \
   --notes "## Firmware v$VERSION
 
