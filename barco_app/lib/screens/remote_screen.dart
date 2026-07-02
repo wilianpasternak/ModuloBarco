@@ -30,7 +30,13 @@ class _RemoteScreenState extends State<RemoteScreen> {
 
   void _stopAcel() { _acelTimer?.cancel(); _acelTimer = null; }
 
-  void _sendAcelOnce(bool plus) {
+  void _sendAcelOnce(bool plus) async {
+    // Se motor desligado e usuario acelerou, ligar o motor primeiro
+    final tel = widget.tel;
+    if (tel != null && !tel.motorLigado) {
+      await widget.ble.sendToggleMotor();
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
     if (plus) { widget.ble.sendAcelPlus(); } else { widget.ble.sendAcelMinus(); }
   }
 
@@ -55,6 +61,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
     final tel = widget.tel;
     final anchorActive = tel?.anchorActive ?? false;
     final northActive  = tel?.northActive  ?? false;
+    final motorActive  = tel?.motorLigado  ?? false;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -90,7 +97,10 @@ class _RemoteScreenState extends State<RemoteScreen> {
                     ),
 
                     // Motor (centro — toque simples)
-                    _MotorCircleBtn(onTap: widget.ble.sendToggleMotor),
+                    _MotorCircleBtn(
+                      active: motorActive,
+                      onTap: widget.ble.sendToggleMotor,
+                    ),
 
                     // Giro direita
                     _ArrowHoldBtn(
@@ -289,8 +299,9 @@ class _ArrowHoldBtnState extends State<_ArrowHoldBtn> {
 
 // ── Motor circle button (centro) ─────────────────────────────────────────────
 class _MotorCircleBtn extends StatefulWidget {
+  final bool active;
   final Future<void> Function() onTap;
-  const _MotorCircleBtn({required this.onTap});
+  const _MotorCircleBtn({required this.active, required this.onTap});
 
   @override
   State<_MotorCircleBtn> createState() => _MotorCircleBtnState();
@@ -301,23 +312,24 @@ class _MotorCircleBtnState extends State<_MotorCircleBtn> {
 
   @override
   Widget build(BuildContext context) {
+    final active = widget.active;
     return GestureDetector(
       onTapDown:   (_) => setState(() => _pressed = true),
       onTapUp:     (_) { setState(() => _pressed = false); widget.onTap(); },
       onTapCancel: ()  => setState(() => _pressed = false),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 80),
+        duration: const Duration(milliseconds: 120),
         width: 78, height: 78,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: _pressed ? _kGold : Colors.transparent,
+          color: active ? _kGold : (_pressed ? _kGoldDim : Colors.transparent),
           border: Border.all(color: _kGold, width: 2.5),
-          boxShadow: _pressed
-              ? [BoxShadow(color: _kGold.withValues(alpha: 0.4), blurRadius: 16)]
+          boxShadow: active
+              ? [BoxShadow(color: _kGold.withValues(alpha: 0.45), blurRadius: 18)]
               : null,
         ),
         child: Icon(Icons.wind_power,
-          color: _pressed ? _kDark : _kGold,
+          color: active ? _kDark : _kGold,
           size: 38,
         ),
       ),
@@ -450,13 +462,24 @@ class _StatusBar extends StatelessWidget {
         border: Border.all(color: _kGoldDim, width: 1.5),
       ),
       child: Row(children: [
-        _Stat(icon: Icons.speed,      label: 'Veloc.',  value: tel == null ? '--' : '${tel!.speedKmh.toStringAsFixed(1)} km/h'),
+        _Stat(
+          icon: Icons.speed,
+          label: 'Veloc.',
+          value: tel == null ? '--' : '${tel!.speedKmh.toStringAsFixed(1)} km/h',
+        ),
         _Div(),
-        _Stat(icon: Icons.explore,    label: 'Heading', value: tel == null ? '--' : '${tel!.heading.toStringAsFixed(0)}°'),
+        _Stat(
+          icon: Icons.satellite_alt,
+          label: 'Satélites',
+          value: tel == null ? '--' : '${tel!.satellites}',
+        ),
         _Div(),
-        _Stat(icon: Icons.straighten, label: 'Dist.',   value: (tel == null || !tel!.anchorActive) ? '--' : '${tel!.distToAnchor.toStringAsFixed(1)} m'),
-        _Div(),
-        _Stat(icon: Icons.tune,       label: 'PWM',     value: tel == null ? '--' : '${tel!.pwm}'),
+        _Stat(
+          icon: tel != null && tel!.gpsFix ? Icons.gps_fixed : Icons.gps_not_fixed,
+          label: 'GPS',
+          value: tel == null ? '--' : (tel!.gpsFix ? 'FIX' : 'SEM FIX'),
+          valueColor: tel != null ? (tel!.gpsFix ? _kGold : Colors.orange) : null,
+        ),
       ]),
     );
   }
@@ -466,7 +489,8 @@ class _Stat extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
-  const _Stat({required this.icon, required this.label, required this.value});
+  final Color? valueColor;
+  const _Stat({required this.icon, required this.label, required this.value, this.valueColor});
 
   @override
   Widget build(BuildContext context) {
@@ -475,7 +499,7 @@ class _Stat extends StatelessWidget {
       children: [
         Icon(icon, color: _kGoldDim, size: 13),
         const SizedBox(height: 2),
-        Text(value, style: const TextStyle(color: _kGold, fontSize: 12, fontWeight: FontWeight.bold)),
+        Text(value, style: TextStyle(color: valueColor ?? _kGold, fontSize: 12, fontWeight: FontWeight.bold)),
         Text(label, style: const TextStyle(color: _kGoldDim, fontSize: 9)),
       ],
     ));
