@@ -49,6 +49,39 @@ class _RemoteScreenState extends State<RemoteScreen> {
 
   void _stopGiro() { _giroTimer?.cancel(); _giroTimer = null; }
 
+  Future<void> _toggleAnchor() async {
+    final tel = widget.tel;
+    final jaAtiva = tel?.anchorActive ?? false;
+    // Se tentando ATIVAR e GPS sem fix → bloqueia com alerta
+    if (!jaAtiva && !(tel?.gpsFix ?? false)) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: _kPanel,
+          title: Row(children: [
+            Icon(Icons.gps_not_fixed, color: Colors.red.shade400, size: 22),
+            const SizedBox(width: 8),
+            const Text('GPS sem sinal', style: TextStyle(color: _kGold)),
+          ]),
+          content: const Text(
+            'O GPS ainda não está com sinal fixo.\n\n'
+            'Aguarde o card GPS mostrar "OK" (verde) antes de ativar a âncora.',
+            style: TextStyle(color: Colors.white70, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Entendido', style: TextStyle(color: _kGold)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    await widget.ble.sendToggleAnchor();
+  }
+
   @override
   void dispose() {
     _acelTimer?.cancel();
@@ -138,7 +171,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
                       icon: Icons.anchor,
                       label: 'ÂNCORA',
                       active: anchorActive,
-                      onTap: widget.ble.sendToggleAnchor,
+                      onTap: _toggleAnchor,
                     ),
                     _CircleToggleBtn(
                       icon: Icons.gps_fixed,
@@ -477,8 +510,8 @@ class _StatusBar extends StatelessWidget {
         _Stat(
           icon: tel != null && tel!.gpsFix ? Icons.gps_fixed : Icons.gps_not_fixed,
           label: 'GPS',
-          value: tel == null ? '--' : (tel!.gpsFix ? 'FIX' : 'SEM FIX'),
-          valueColor: tel != null ? (tel!.gpsFix ? _kGold : Colors.orange) : null,
+          value: tel == null ? '--' : (tel!.gpsFix ? 'OK' : 'OFF'),
+          valueColor: tel != null ? (tel!.gpsFix ? Colors.green.shade400 : Colors.red.shade400) : null,
         ),
       ]),
     );
