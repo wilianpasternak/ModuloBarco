@@ -23,10 +23,9 @@ class _ScanScreenState extends State<ScanScreen> {
     _requestPermissions();
   }
 
+  String? _bleError;
+
   Future<void> _requestPermissions() async {
-    // Android: permissoes separadas de scan/connect/location
-    // iOS: permissao BLE e concedida pelo sistema quando o scan inicia;
-    //      permission_handler so precisa da localizacao no iOS
     await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
@@ -34,32 +33,45 @@ class _ScanScreenState extends State<ScanScreen> {
     ].request();
   }
 
-  // Retorna true se o resultado e o ModuloBarco
-  bool _isModuloBarco(ScanResult r) {
-    // iOS pode retornar o nome em platformName ou em advertisementData.localName
-    final name1 = r.device.platformName;
-    final name2 = r.advertisementData.advName;
-    return name1 == 'ModuloBarco' || name2 == 'ModuloBarco';
+  String _deviceName(ScanResult r) {
+    if (r.device.platformName.isNotEmpty) return r.device.platformName;
+    if (r.advertisementData.advName.isNotEmpty) return r.advertisementData.advName;
+    return 'Desconhecido';
   }
 
   Future<void> _startScan() async {
-    setState(() { _results.clear(); _scanning = true; });
+    setState(() { _bleError = null; _results.clear(); _scanning = true; });
 
-    // withServices filtra pelo UUID do servico BLE — funciona em iOS e Android
-    // evita que iOS ignore dispositivos cujo nome so aparece no scan response
-    await FlutterBluePlus.startScan(
-      withServices: [Guid('0000ffe0-0000-1000-8000-00805f9b34fb')],
-      timeout: const Duration(seconds: 10),
-    );
+    // Verifica estado do Bluetooth antes de escanear
+    final btState = await FlutterBluePlus.adapterState.first;
+    if (btState != BluetoothAdapterState.on) {
+      setState(() {
+        _scanning = false;
+        _bleError = 'Bluetooth desligado ou permissão negada.\n\n'
+            'iOS: Ajustes > Privacidade e Segurança > Bluetooth\n'
+            'e ative para "Barco App"';
+      });
+      return;
+    }
+
+    // Sem filtro withServices — iOS às vezes coloca o UUID no scan response
+    // e nesse caso withServices bloqueia o dispositivo. Mostra todos os
+    // dispositivos BLE para o usuario escolher o ModuloBarco.
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
 
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         for (final r in results) {
-          if (!_isModuloBarco(r)) continue;
           if (!_results.any((e) => e.device.remoteId == r.device.remoteId)) {
             _results.add(r);
           }
         }
+        // Ordena: ModuloBarco primeiro
+        _results.sort((a, b) {
+          final aIsTarget = _deviceName(a) == 'ModuloBarco' ? 0 : 1;
+          final bIsTarget = _deviceName(b) == 'ModuloBarco' ? 0 : 1;
+          return aIsTarget.compareTo(bIsTarget);
+        });
       });
     });
 
@@ -132,6 +144,21 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
           ),
           const SizedBox(height: 24),
+          if (_bleError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade900.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade700),
+                ),
+                child: Text(_bleError!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              ),
+            ),
           Expanded(
             child: _results.isEmpty
                 ? Center(
@@ -144,13 +171,28 @@ class _ScanScreenState extends State<ScanScreen> {
                     itemCount: _results.length,
                     itemBuilder: (_, i) {
                       final r = _results[i];
-                      final name = r.device.platformName.isEmpty ? 'HM-10' : r.device.platformName;
+                      final name = _deviceName(r);
+                      final isTarget = name == 'ModuloBarco';
                       return Card(
-                        color: const Color(0xFF1B2A3B),
+                        color: isTarget
+                            ? const Color(0xFF1A2A10)
+                            : const Color(0xFF1B2A3B),
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(
+                            color: isTarget ? Colors.green.shade600 : Colors.transparent,
+                            width: 1.5,
+                          ),
+                        ),
                         child: ListTile(
-                          leading: const Icon(Icons.bluetooth, color: Colors.blue),
-                          title: Text(name, style: const TextStyle(color: Colors.white)),
+                          leading: Icon(Icons.bluetooth,
+                              color: isTarget ? Colors.green.shade400 : Colors.blue),
+                          title: Text(name,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: isTarget ? FontWeight.bold : FontWeight.normal,
+                              )),
                           subtitle: Text(r.device.remoteId.toString(),
                               style: const TextStyle(color: Colors.white38, fontSize: 12)),
                           trailing: Text('${r.rssi} dBm',
