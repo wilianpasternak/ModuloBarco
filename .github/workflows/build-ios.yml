@@ -1,0 +1,42 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.6'
+          channel: 'stable'
+          cache: true
+
+      - name: Instalar dependências
+        working-directory: barco_app
+        run: flutter pub get
+
+      - name: Build iOS sem assinatura
+        working-directory: barco_app
+        run: flutter build ios --release --no-codesign
+
+      - name: Empacotar IPA não-assinado
+        run: |
+          mkdir -p Payload
+          cp -r barco_app/build/ios/iphoneos/Runner.app Payload/
+          zip -r ModuloBarco-unsigned.ipa Payload/
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: modulo-barco-ios-${{ github.run_number }}
+          path: ModuloBarco-unsigned.ipa
+          retention-days: 30
