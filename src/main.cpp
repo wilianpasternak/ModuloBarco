@@ -1,6 +1,7 @@
 // ================= DEFINES =================
 //#define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
+#define FIRMWARE_VERSION "1.0.0"
 //#define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -10,6 +11,7 @@
 #include <TinyGPS++.h>
 #include <HMC5883L.h>
 #include <NimBLEDevice.h>
+#include <Update.h>
 #ifdef USE_NRF
   #include <SPI.h>
   #include <nRF24L01.h>
@@ -19,6 +21,7 @@
 // ================= BLE UUIDs =================
 #define BLE_SVC_UUID "0000ffe0-0000-1000-8000-00805f9b34fb"
 #define BLE_CHR_UUID "0000ffe1-0000-1000-8000-00805f9b34fb"
+#define BLE_OTA_UUID "0000ffe2-0000-1000-8000-00805f9b34fb"
 
 // ================= PINOS — ESP32 DevKit Classic =================
 const int left       = 2;    // PWM giro esquerda  (LEDC)
@@ -82,6 +85,11 @@ NimBLECharacteristic* pBleChar    = nullptr;
 bool                  bleConnected = false;
 bool                  pendingHmnNotify = false;
 unsigned long         hmnNotifyTime   = 0;
+
+NimBLECharacteristic* pOtaChar = nullptr;
+bool otaActive = false;
+size_t otaExpectedSize = 0;
+size_t otaBytesReceived = 0;
 
 // ================= ESTADOS =================
 bool anchorMode  = false;
@@ -574,6 +582,73 @@ void processBlecmd(const String& cmd) {
   }
 }
 
+// ================= OTA CALLBACKS =================
+class OtaCharCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* c) override {
+    std::string val = c->getValue();
+    if (val.empty()) return;
+
+    // Check for text commands (OTA_START, OTA_END)
+    String s = String(val.c_str());
+    if (s.startsWith("OTA_START:")) {
+      // Format: OTA_START:<size>:<version>
+      int colon2 = s.indexOf(':', 10);
+      otaExpectedSize = s.substring(10, colon2).toInt();
+      String ver = (colon2 > 0) ? s.substring(colon2 + 1) : "?";
+      #ifdef LOG_ENABLE
+        Serial.printf("[OTA] Start: %u bytes, version %s\n", otaExpectedSize, ver.c_str());
+      #endif
+      if (!Update.begin(otaExpectedSize, U_FLASH)) {
+        String err = "OTA_ERR:begin failed\n";
+        pOtaChar->setValue((uint8_t*)err.c_str(), err.length());
+        pOtaChar->notify();
+        otaActive = false;
+        return;
+      }
+      otaBytesReceived = 0;
+      otaActive = true;
+      String rdy = "OTA_READY\n";
+      pOtaChar->setValue((uint8_t*)rdy.c_str(), rdy.length());
+      pOtaChar->notify();
+    } else if (s.startsWith("OTA_END")) {
+      if (!otaActive) return;
+      otaActive = false;
+      if (Update.end(true)) {
+        String ok = "OTA_OK\n";
+        pOtaChar->setValue((uint8_t*)ok.c_str(), ok.length());
+        pOtaChar->notify();
+        delay(500);
+        ESP.restart();
+      } else {
+        String err = "OTA_ERR:end failed\n";
+        pOtaChar->setValue((uint8_t*)err.c_str(), err.length());
+        pOtaChar->notify();
+      }
+    } else if (otaActive) {
+      // Binary data chunk
+      size_t written = Update.write((uint8_t*)val.data(), val.size());
+      otaBytesReceived += written;
+      if (written != val.size()) {
+        String err = "OTA_ERR:write failed\n";
+        pOtaChar->setValue((uint8_t*)err.c_str(), err.length());
+        pOtaChar->notify();
+        otaActive = false;
+        Update.abort();
+        return;
+      }
+      // Send ACK every 16KB
+      if (otaBytesReceived % (16 * 1024) < val.size()) {
+        String ack = "OTA_ACK:" + String(otaBytesReceived) + "\n";
+        pOtaChar->setValue((uint8_t*)ack.c_str(), ack.length());
+        pOtaChar->notify();
+        #ifdef LOG_ENABLE
+          Serial.printf("[OTA] Progress: %u/%u bytes\n", otaBytesReceived, otaExpectedSize);
+        #endif
+      }
+    }
+  }
+};
+
 // ================= BLE CALLBACKS =================
 class BleServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer*) override {
@@ -739,6 +814,13 @@ void setup() {
     NIMBLE_PROPERTY::WRITE_NR
   );
   pBleChar->setCallbacks(new BleCharCallbacks());
+  pOtaChar = pService->createCharacteristic(
+    BLE_OTA_UUID,
+    NIMBLE_PROPERTY::WRITE   |
+    NIMBLE_PROPERTY::WRITE_NR|
+    NIMBLE_PROPERTY::NOTIFY
+  );
+  pOtaChar->setCallbacks(new OtaCharCallbacks());
   pService->start();
   NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
   pAdv->addServiceUUID(BLE_SVC_UUID);
@@ -789,6 +871,7 @@ void loop() {
   if (pendingHmnNotify && bleConnected && (millis() - hmnNotifyTime) > 500) {
     pendingHmnNotify = false;
     bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
+    bleSend("$VER:" + String(FIRMWARE_VERSION) + "\n");
   }
 
   // --- GPS ---
@@ -1018,7 +1101,7 @@ void loop() {
 
   // ========================================================
   //         TELEMETRIA BLE (500ms)
-  //         $lat,lon,hdg,spd,dist,brg,anc,pwm,nrt\n
+  //         $lat,lon,hdg,spd,dist,brg,anc,pwm,nrt,mot,sat\n
   // ========================================================
   if (bleConnected && (millis() - lastTelemetryTime) >= 500) {
     lastTelemetryTime = millis();
@@ -1032,7 +1115,11 @@ void loop() {
     tel += String(anchorMode ? bearingFiltered : 0.0, 1);tel += ",";
     tel += String(anchorMode ? 1 : 0);                   tel += ",";
     tel += String(pwmComHeading);                        tel += ",";
-    tel += String(northMode ? 1 : 0);                    tel += "\n";
+    tel += String(northMode ? 1 : 0);                    tel += ",";
+    tel += String(motorLigado ? 1 : 0);
+    tel += ",";
+    tel += String(gps.satellites.value());
+    tel += "\n";
     bleSend(tel);
   }
 

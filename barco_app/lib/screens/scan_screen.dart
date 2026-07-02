@@ -5,9 +5,13 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/ble_service.dart';
 import 'app_shell.dart';
 
+const _kGold    = Color(0xFFD4A800);
+const _kGoldDim = Color(0xFF6B5400);
+const _kDark    = Color(0xFF0F0F08);
+const _kPanel   = Color(0xFF1A1A10);
+
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
-
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
@@ -16,14 +20,13 @@ class _ScanScreenState extends State<ScanScreen> {
   final List<ScanResult> _results = [];
   bool _scanning = false;
   StreamSubscription? _scanSub;
+  String? _bleError;
 
   @override
   void initState() {
     super.initState();
     _requestPermissions();
   }
-
-  String? _bleError;
 
   Future<void> _requestPermissions() async {
     await [
@@ -42,21 +45,17 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _startScan() async {
     setState(() { _bleError = null; _results.clear(); _scanning = true; });
 
-    // Verifica estado do Bluetooth antes de escanear
     final btState = await FlutterBluePlus.adapterState.first;
     if (btState != BluetoothAdapterState.on) {
       setState(() {
         _scanning = false;
         _bleError = 'Bluetooth desligado ou permissão negada.\n\n'
             'iOS: Ajustes > Privacidade e Segurança > Bluetooth\n'
-            'e ative para "Barco App"';
+            'e ative para "Braga Pesca"';
       });
       return;
     }
 
-    // Sem filtro withServices — iOS às vezes coloca o UUID no scan response
-    // e nesse caso withServices bloqueia o dispositivo. Mostra todos os
-    // dispositivos BLE para o usuario escolher o ModuloBarco.
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
 
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
@@ -66,11 +65,10 @@ class _ScanScreenState extends State<ScanScreen> {
             _results.add(r);
           }
         }
-        // Ordena: ModuloBarco primeiro
         _results.sort((a, b) {
-          final aIsTarget = _deviceName(a) == 'ModuloBarco' ? 0 : 1;
-          final bIsTarget = _deviceName(b) == 'ModuloBarco' ? 0 : 1;
-          return aIsTarget.compareTo(bIsTarget);
+          final aT = _deviceName(a) == 'BragaPesca' ? 0 : 1;
+          final bT = _deviceName(b) == 'BragaPesca' ? 0 : 1;
+          return aT.compareTo(bT);
         });
       });
     });
@@ -82,14 +80,16 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _connect(BluetoothDevice device) async {
     final ble = BleService();
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const AlertDialog(
+      builder: (_) => AlertDialog(
+        backgroundColor: _kPanel,
         content: Row(children: [
-          CircularProgressIndicator(),
-          SizedBox(width: 16),
-          Text('Conectando...'),
+          const CircularProgressIndicator(color: _kGold),
+          const SizedBox(width: 16),
+          Text('Conectando ao motor...', style: TextStyle(color: Colors.white.withValues(alpha: 0.8))),
         ]),
       ),
     );
@@ -118,44 +118,46 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1B2A),
+      backgroundColor: _kDark,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1B2A3B),
-        title: const Text('Módulo Barco', style: TextStyle(color: Colors.white)),
+        backgroundColor: _kPanel,
+        title: const Text('Braga Pesca',
+            style: TextStyle(color: _kGold, fontWeight: FontWeight.bold, letterSpacing: 1)),
         centerTitle: true,
       ),
       body: Column(
         children: [
-          const SizedBox(height: 24),
-          Icon(Icons.bluetooth_searching, size: 64, color: Colors.blue.shade300),
-          const SizedBox(height: 12),
-          const Text('Procurando ModuloBarco...', style: TextStyle(color: Colors.white70, fontSize: 16)),
+          const SizedBox(height: 32),
+          // Logo
+          Image.asset('assets/logo_braga_pesca.png', height: 110),
           const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: _scanning ? null : _startScan,
             icon: _scanning
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.search),
-            label: Text(_scanning ? 'Procurando...' : 'Iniciar varredura'),
+                ? const SizedBox(width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: _kDark))
+                : const Icon(Icons.search, color: _kDark),
+            label: Text(_scanning ? 'Procurando...' : 'Procurar Motor',
+                style: const TextStyle(color: _kDark, fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade700,
-              foregroundColor: Colors.white,
+              backgroundColor: _kGold,
+              disabledBackgroundColor: _kGoldDim,
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           if (_bleError != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: Colors.red.shade900.withValues(alpha: 0.4),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.red.shade700),
                 ),
-                child: Text(_bleError!,
-                    textAlign: TextAlign.center,
+                child: Text(_bleError!, textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white70, fontSize: 13)),
               ),
             ),
@@ -164,7 +166,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 ? Center(
                     child: Text(
                       _scanning ? '' : 'Nenhum dispositivo encontrado',
-                      style: const TextStyle(color: Colors.white38),
+                      style: const TextStyle(color: _kGoldDim),
                     ),
                   )
                 : ListView.builder(
@@ -172,31 +174,26 @@ class _ScanScreenState extends State<ScanScreen> {
                     itemBuilder: (_, i) {
                       final r = _results[i];
                       final name = _deviceName(r);
-                      final isTarget = name == 'ModuloBarco';
+                      final isTarget = name == 'BragaPesca';
                       return Card(
-                        color: isTarget
-                            ? const Color(0xFF1A2A10)
-                            : const Color(0xFF1B2A3B),
+                        color: isTarget ? const Color(0xFF1A2A10) : _kPanel,
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                           side: BorderSide(
-                            color: isTarget ? Colors.green.shade600 : Colors.transparent,
-                            width: 1.5,
-                          ),
+                            color: isTarget ? _kGold : Colors.transparent, width: 1.5),
                         ),
                         child: ListTile(
                           leading: Icon(Icons.bluetooth,
-                              color: isTarget ? Colors.green.shade400 : Colors.blue),
-                          title: Text(name,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: isTarget ? FontWeight.bold : FontWeight.normal,
-                              )),
+                              color: isTarget ? _kGold : Colors.blue.shade300),
+                          title: Text(name, style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: isTarget ? FontWeight.bold : FontWeight.normal,
+                          )),
                           subtitle: Text(r.device.remoteId.toString(),
-                              style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                              style: const TextStyle(color: _kGoldDim, fontSize: 11)),
                           trailing: Text('${r.rssi} dBm',
-                              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                              style: const TextStyle(color: _kGoldDim, fontSize: 12)),
                           onTap: () => _connect(r.device),
                         ),
                       );

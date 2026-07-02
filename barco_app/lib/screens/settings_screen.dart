@@ -1,10 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/ble_service.dart';
+import 'scan_screen.dart';
+
+const _kGold    = Color(0xFFD4A800);
+const _kGoldDim = Color(0xFF6B5400);
+const _kPanel   = Color(0xFF1A1A10);
+const _kDark    = Color(0xFF0F0F08);
 
 class SettingsScreen extends StatefulWidget {
   final BleService ble;
-  const SettingsScreen({super.key, required this.ble});
+  final int initialPwmHelMin;
+  const SettingsScreen({super.key, required this.ble, this.initialPwmHelMin = 0});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -14,9 +21,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _pwmHelMin = 0;
   StreamSubscription? _hmnSub;
 
+  // OTA state
+  String? _latestVersion;
+  String? _otaUrl;
+  double? _otaProgress;
+
   @override
   void initState() {
     super.initState();
+    _pwmHelMin = widget.initialPwmHelMin;
     _hmnSub = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
   }
 
@@ -38,8 +51,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1B2A3B),
-        title: const Text('Calibrar Bússola', style: TextStyle(color: Colors.white)),
+        backgroundColor: _kPanel,
+        title: const Text('Calibrar Bússola', style: TextStyle(color: _kGold)),
         content: const Text(
           'O motor vai girar 360° para cada lado durante ~20 segundos.\n\nCertifique-se de que o barco esteja na água e com espaço livre.',
           style: TextStyle(color: Colors.white70),
@@ -47,12 +60,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
+            child: const Text('Cancelar', style: TextStyle(color: _kGoldDim)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
+            style: ElevatedButton.styleFrom(backgroundColor: _kGold),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Iniciar'),
+            child: const Text('Iniciar', style: TextStyle(color: _kDark)),
           ),
         ],
       ),
@@ -73,6 +86,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) Navigator.of(context, rootNavigator: true).pop();
   }
 
+  Future<void> _checkForUpdate() async {
+    final result = await widget.ble.checkForUpdate();
+    setState(() {
+      _latestVersion = result?['version'];
+      _otaUrl = result?['url'];
+    });
+    if (result == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível verificar atualizações')));
+    }
+  }
+
+  Future<void> _startOta() async {
+    if (_otaUrl == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _kPanel,
+        title: const Text('Atualizar firmware?', style: TextStyle(color: _kGold)),
+        content: Text(
+          'O motor será atualizado para v$_latestVersion.\n\nMantenha o motor parado e o celular próximo durante a atualização (~2 min).',
+          style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar', style: TextStyle(color: _kGoldDim))),
+          TextButton(onPressed: () => Navigator.pop(context, true),
+              child: const Text('Atualizar', style: TextStyle(color: _kGold))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _otaProgress = 0.0);
+    final ok = await widget.ble.performOta(_otaUrl!, (p) {
+      if (mounted) setState(() => _otaProgress = p);
+    });
+    setState(() => _otaProgress = null);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'Firmware atualizado! O motor está reiniciando...'
+            : 'Falha na atualização. Tente novamente.'),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -80,16 +138,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('Motor'),
+          _SectionTitle('Motor'),
           const SizedBox(height: 12),
 
           // ── PWM Mínimo da Hélice ─────────────────────────────────
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF1B2A3B),
+              color: _kPanel,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white12),
+              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,7 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 LinearProgressIndicator(
                   value: _pwmHelMin / 255.0,
                   backgroundColor: Colors.white12,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade400),
+                  valueColor: const AlwaysStoppedAnimation<Color>(_kGold),
                   borderRadius: BorderRadius.circular(4),
                   minHeight: 6,
                 ),
@@ -146,14 +204,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 28),
 
           // ── Calibracao bussola ───────────────────────────────────
-          const _SectionTitle('Bússola'),
+          _SectionTitle('Bússola'),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF1B2A3B),
+              color: _kPanel,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white12),
+              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,7 +229,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.teal.shade800,
+                      backgroundColor: _kGoldDim,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -184,26 +242,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+
+          // ── Procurar novo motor ──────────────────────────────────
+          const SizedBox(height: 24),
+          GestureDetector(
+            onTap: () async {
+              await widget.ble.disconnect();
+              await BleService.clearSavedDevice();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const ScanScreen()),
+                  (route) => false,
+                );
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _kGoldDim, width: 1.5),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.bluetooth_searching, color: _kGoldDim, size: 20),
+                  SizedBox(width: 8),
+                  Text('Procurar novo motor',
+                      style: TextStyle(color: _kGoldDim, fontSize: 14, fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Atualização de Firmware (OTA) ────────────────────────
+          const SizedBox(height: 30),
+          _SectionTitle('ATUALIZAÇÃO DE FIRMWARE'),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Versão atual: ${widget.ble.firmwareVersion}',
+                  style: const TextStyle(color: _kGoldDim, fontSize: 13)),
+              if (_latestVersion != null)
+                Text('Versão disponível: $_latestVersion',
+                    style: const TextStyle(color: _kGold, fontSize: 13)),
+            ])),
+          ]),
+          const SizedBox(height: 12),
+          if (_otaProgress != null)
+            Column(children: [
+              LinearProgressIndicator(value: _otaProgress, color: _kGold,
+                  backgroundColor: _kGoldDim.withValues(alpha: 0.3)),
+              const SizedBox(height: 8),
+              Text('${((_otaProgress ?? 0) * 100).toStringAsFixed(0)}%',
+                  style: const TextStyle(color: _kGold, fontSize: 13)),
+            ])
+          else
+            Row(children: [
+              Expanded(child: _GoldOutlineBtn(
+                label: 'Verificar atualização',
+                icon: Icons.cloud_download_outlined,
+                onTap: _checkForUpdate,
+              )),
+              if (_latestVersion != null && _latestVersion != widget.ble.firmwareVersion) ...[
+                const SizedBox(width: 10),
+                Expanded(child: _GoldOutlineBtn(
+                  label: 'Atualizar',
+                  icon: Icons.system_update_alt,
+                  onTap: _startOta,
+                  gold: true,
+                )),
+              ],
+            ]),
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 }
 
-// ── Section title ────────────────────────────────────────────────────────────
+// ── Section title (gold divider style) ──────────────────────────────────────
 class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);
   @override
-  Widget build(BuildContext context) => Text(
-    text.toUpperCase(),
-    style: TextStyle(
-      color: Colors.blue.shade300,
-      fontSize: 11,
-      fontWeight: FontWeight.bold,
-      letterSpacing: 1.8,
+  Widget build(BuildContext context) => Row(children: [
+    Expanded(child: Divider(color: _kGoldDim.withValues(alpha: 0.4))),
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Text(text.toUpperCase(),
+          style: const TextStyle(color: _kGoldDim, fontSize: 10, letterSpacing: 2)),
     ),
-  );
+    Expanded(child: Divider(color: _kGoldDim.withValues(alpha: 0.4))),
+  ]);
 }
 
 // ── PWM +/- button ────────────────────────────────────────────────────────────
@@ -221,12 +351,12 @@ class _PwmBtn extends StatelessWidget {
         height: 52,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: onPressed != null ? Colors.blue.shade700 : Colors.grey.shade800,
+          color: onPressed != null ? _kGold : Colors.grey.shade800,
         ),
         child: Center(
           child: Text(label,
               style: TextStyle(
-                color: onPressed != null ? Colors.white : Colors.white38,
+                color: onPressed != null ? _kDark : Colors.white38,
                 fontSize: 26,
                 fontWeight: FontWeight.bold,
               )),
@@ -234,6 +364,35 @@ class _PwmBtn extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Gold outline button ───────────────────────────────────────────────────────
+class _GoldOutlineBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool gold;
+  const _GoldOutlineBtn({required this.label, required this.icon, required this.onTap, this.gold = false});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: gold ? _kGold : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: gold ? _kGold : _kGoldDim, width: 1.5),
+      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(icon, color: gold ? _kDark : _kGoldDim, size: 18),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(
+          color: gold ? _kDark : _kGoldDim,
+          fontSize: 12, fontWeight: FontWeight.w600,
+        )),
+      ]),
+    ),
+  );
 }
 
 // ── Calibration progress dialog ───────────────────────────────────────────────
@@ -267,8 +426,8 @@ class _CalibrationProgressDialogState extends State<_CalibrationProgressDialog> 
     final progress = (_elapsed / 22.0).clamp(0.0, 1.0);
     final phase = _elapsed < 11 ? 'Girando esquerda...' : 'Girando direita...';
     return AlertDialog(
-      backgroundColor: const Color(0xFF1B2A3B),
-      title: const Text('Calibrando Bússola', style: TextStyle(color: Colors.white)),
+      backgroundColor: _kPanel,
+      title: const Text('Calibrando Bússola', style: TextStyle(color: _kGold)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -277,7 +436,7 @@ class _CalibrationProgressDialogState extends State<_CalibrationProgressDialog> 
           LinearProgressIndicator(
             value: progress,
             backgroundColor: Colors.white12,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal.shade400),
+            valueColor: const AlwaysStoppedAnimation<Color>(_kGold),
             minHeight: 8,
             borderRadius: BorderRadius.circular(4),
           ),

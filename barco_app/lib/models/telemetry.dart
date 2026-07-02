@@ -8,6 +8,8 @@ class Telemetry {
   final bool anchorActive;
   final int pwm;
   final bool northActive;
+  final bool motorLigado;
+  final int satellites;
 
   const Telemetry({
     required this.lat,
@@ -19,9 +21,14 @@ class Telemetry {
     required this.anchorActive,
     required this.pwm,
     required this.northActive,
+    required this.motorLigado,
+    required this.satellites,
   });
 
-  // Formato: $lat,lon,hdg,spd,dist,brg,anc,pwm,nrt\n
+  bool get gpsFix => satellites >= 4;
+  bool get hasValidPosition => lat != 0.0 || lon != 0.0;
+
+  // Format: $lat,lon,hdg,spd,dist,brg,anc,pwm,nrt,mot,sat\n
   static Telemetry? fromLine(String line) {
     if (!line.startsWith('\$')) return null;
     final parts = line.substring(1).split(',');
@@ -37,11 +44,11 @@ class Telemetry {
         anchorActive:    parts[6].trim() == '1',
         pwm:             parts.length > 7 ? int.tryParse(parts[7].trim()) ?? 0 : 0,
         northActive:     parts.length > 8 ? parts[8].trim() == '1' : false,
+        motorLigado:     parts.length > 9 ? parts[9].trim() == '1' : false,
+        satellites:      parts.length > 10 ? int.tryParse(parts[10].trim()) ?? 0 : 0,
       );
     } catch (_) {
       return null;
     }
   }
-
-  bool get hasValidPosition => lat != 0.0 || lon != 0.0;
 }
