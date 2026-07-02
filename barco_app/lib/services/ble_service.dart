@@ -52,7 +52,9 @@ class BleService {
     _device = device;
     _connectionController.add(true);
 
-    if (Platform.isAndroid) await device.requestMtu(512);
+    // Solicita MTU máximo em ambas as plataformas
+    // Android: obrigatório via requestMtu; iOS: negocia automaticamente mas requestMtu acelera o processo
+    try { await device.requestMtu(512); } catch (_) {}  // iOS pode lançar exceção em alguns casos
 
     final services = await device.discoverServices();
     for (final s in services) {
@@ -196,7 +198,7 @@ class BleService {
 
   // --- OTA firmware update over BLE ---
   Future<bool> performOta(String firmwareUrl, void Function(double) onProgress) async {
-    if (_otaCharacteristic == null) return false;
+    if (_otaCharacteristic == null || _device == null) return false;
     try {
       // Download firmware binary
       final resp = await http.get(Uri.parse(firmwareUrl));
@@ -204,33 +206,40 @@ class BleService {
       final bytes = resp.bodyBytes;
       final totalSize = bytes.length;
 
-      // Send OTA_START command
+      // Chunk size = MTU - 3 bytes ATT overhead (safe para iOS e Android)
+      // iOS sem requestMtu negocia ~185 → max write 182 bytes
+      final mtu = await _device!.mtu.first;
+      final chunkSize = (mtu - 3).clamp(20, 512);
+
+      // Comando OTA_START com resposta (confiabilidade)
       final startCmd = utf8.encode('OTA_START:$totalSize:new\n');
       await _otaCharacteristic!.write(startCmd, withoutResponse: false);
+      await Future.delayed(const Duration(milliseconds: 600));
 
-      // Wait for OTA_READY acknowledgement
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Send firmware in chunks
-      const chunkSize = 512;
+      // Envia chunks sem resposta (mais rápido; NimBLE bufferiza)
       int offset = 0;
+      int chunkNum = 0;
       while (offset < totalSize) {
         final end = (offset + chunkSize > totalSize) ? totalSize : offset + chunkSize;
         final chunk = bytes.sublist(offset, end);
-        await _otaCharacteristic!.write(chunk, withoutResponse: false);
+        await _otaCharacteristic!.write(chunk, withoutResponse: true);
         offset = end;
+        chunkNum++;
         onProgress(offset / totalSize);
-        // Small delay every 32 chunks to avoid overwhelming BLE buffer
-        if ((offset ~/ chunkSize) % 32 == 0) {
-          await Future.delayed(const Duration(milliseconds: 10));
+        // Controle de fluxo: pausa a cada 20 pacotes para não saturar o buffer BLE
+        if (chunkNum % 20 == 0) {
+          await Future.delayed(const Duration(milliseconds: 30));
         }
       }
 
-      // Finalise OTA
+      // Aguarda o firmware processar os últimos chunks
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Comando OTA_END com resposta (confiabilidade)
       await _otaCharacteristic!.write(utf8.encode('OTA_END\n'), withoutResponse: false);
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 3));
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
