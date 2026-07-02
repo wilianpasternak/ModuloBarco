@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../models/telemetry.dart';
 
@@ -39,7 +40,7 @@ class BleService {
     _device = device;
     _connectionController.add(true);
 
-    await device.requestMtu(512);
+    if (Platform.isAndroid) await device.requestMtu(512);
 
     final services = await device.discoverServices();
     for (final s in services) {
