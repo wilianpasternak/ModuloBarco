@@ -156,6 +156,10 @@ class BleService {
   // --- Calibrar bussola ---
   Future<void> sendCalibrate()     => sendCommand('\$CAL');
 
+  // --- Aponta Norte (calibracao): gira para 0° com PWM 120 e histerese 5° ---
+  Future<void> sendApontarNorte()  => sendCommand('\$APN');
+  Future<void> sendPararNorte()    => sendCommand('\$APN-');
+
   // --- Saved device ---
   static Future<void> saveDevice(String remoteId) async {
     final prefs = await SharedPreferences.getInstance();

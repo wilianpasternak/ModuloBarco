@@ -20,6 +20,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   int _pwmHelMin = 0;
   StreamSubscription? _hmnSub;
+  bool _apontandoNorte = false;
 
   // OTA state
   String? _latestVersion;
@@ -36,7 +37,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _hmnSub?.cancel();
+    // Garante que o modo aponta-norte para ao sair da tela
+    if (_apontandoNorte) widget.ble.sendPararNorte();
     super.dispose();
+  }
+
+  Future<void> _toggleApontarNorte() async {
+    if (_apontandoNorte) {
+      await widget.ble.sendPararNorte();
+      setState(() => _apontandoNorte = false);
+    } else {
+      await widget.ble.sendApontarNorte();
+      setState(() => _apontandoNorte = true);
+    }
   }
 
   Future<void> _incrementPwm() async {
@@ -248,6 +261,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: const Icon(Icons.explore),
                     label: const Text('Calibrar Bússola', style: TextStyle(fontSize: 15)),
                     onPressed: _calibrate,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _apontandoNorte ? Colors.red.shade800 : _kPanel,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(
+                          color: _apontandoNorte ? Colors.red.shade400 : _kGoldDim,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                    icon: Icon(_apontandoNorte ? Icons.stop_circle_outlined : Icons.navigation),
+                    label: Text(
+                      _apontandoNorte ? 'Parar' : 'Apontar para Norte (0°)',
+                      style: const TextStyle(fontSize: 15),
+                    ),
+                    onPressed: _toggleApontarNorte,
                   ),
                 ),
               ],

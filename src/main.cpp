@@ -1,8 +1,8 @@
 // ================= DEFINES =================
 //#define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.0.0"
-//#define USE_BUZZER  // Descomente para ativar buzzer fisico
+#define FIRMWARE_VERSION "1.1.14"
+#define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
 #include <Arduino.h>
@@ -34,11 +34,9 @@ const int pinDown    = 13;   // Descer (digital HIGH=ativo)
 #define I2C_SDA_PIN  21
 #define I2C_SCL_PIN  22
 #ifdef USE_BUZZER
-  const int buz = 25;        // Buzzer placeholder — ajuste o pino conforme hardware
+  const int buz = 27;        // Buzzer placeholder — ajuste o pino conforme hardware
 #endif
-#ifndef USE_NRF
-  const int PIN_BTN_ANCORA = 27;
-#endif
+
 #ifdef USE_NRF
   #define NRF_CE_PIN   14    // CE
   #define NRF_CSN_PIN  15    // CSN / SS
@@ -585,6 +583,19 @@ void processBlecmd(const String& cmd) {
     bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
     bleSend("$VER:" + String(FIRMWARE_VERSION) + "\n");
   }
+  // --- Aponta Norte: gira para 0° com PWM 120 e histerese 5° (calibracao bussola) ---
+  else if (cmd == "$APN") {
+    apontaNorteMode = true;
+    anchorMode  = false;
+    northMode   = false;
+    giroDir     = false;
+    giroEsq     = false;
+    motorWrite(left, 0); motorWrite(right, 0);
+  }
+  else if (cmd == "$APN-") {
+    apontaNorteMode = false;
+    motorWrite(left, 0); motorWrite(right, 0);
+  }
 }
 
 // ================= OTA CALLBACKS =================
@@ -694,7 +705,8 @@ void setup() {
     while (!Serial && millis() - _t < 3000) delay(10);
     Serial.println();
     Serial.println(F("========================================"));
-    Serial.println(F("      MODULO BARCO  —  firmware v2.0"));
+    Serial.print(F("      MODULO BARCO  —  firmware "));
+    Serial.println(F(FIRMWARE_VERSION));
     Serial.println(F("      Plataforma : ESP32 DevKit Classic"));
     #ifdef USE_NRF
       Serial.println(F("      Modo : BLE + RADIO NRF24L01"));
@@ -772,12 +784,6 @@ void setup() {
     #ifdef LOG_ENABLE
       Serial.println(F("  NRF24L01 : OK"));
     #endif
-  #else
-    pinMode(PIN_BTN_ANCORA, INPUT_PULLUP);
-    #ifdef LOG_ENABLE
-      Serial.print(F("  Botao ancora : GPIO ")); Serial.print(PIN_BTN_ANCORA);
-      Serial.println(F(" [INPUT_PULLUP]"));
-    #endif
   #endif
 
   // --- HMC5883L ---
@@ -839,20 +845,31 @@ void setup() {
     for (int i = 0; i < 2; i++) {
       digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
     }
-    // Calibracao via botao fisico na inicializacao (sem NRF)
-    #ifndef USE_NRF
-      if (digitalRead(PIN_BTN_ANCORA) == LOW) {
-        #ifdef LOG_ENABLE
-          Serial.println(F("[CALIBRACAO] Botao pressionado na inicializacao"));
-        #endif
-        for (int i = 0; i < 3; i++) {
-          digitalWrite(buz, HIGH); delay(100); digitalWrite(buz, LOW); delay(100);
-        }
-        delay(500);
-        calibrarBussola();
-      }
-    #endif
+    
   #endif
+
+  motorWrite(left, 140); motorWrite(right, 0);
+  delay(600);
+  motorWrite(left, 0); motorWrite(right, 140);
+  delay(600);
+  motorWrite(left, 0); motorWrite(right, 0);
+  
+
+
+  delay(1000);
+  motorWrite(left, 140); motorWrite(right, 0);
+  delay(1000);
+  motorWrite(left, 0); motorWrite(right, 140);
+  delay(1000);
+  motorWrite(left, 0); motorWrite(right, 0);
+  
+
+  delay(1000);
+  motorWrite(left, 140); motorWrite(right, 0);
+  delay(1000);
+  motorWrite(left, 0); motorWrite(right, 140);
+  delay(1000);
+  motorWrite(left, 0); motorWrite(right, 0);
 }
 
 // ================= LOOP =================
@@ -977,11 +994,6 @@ void loop() {
   // ========================================================
   //         MODO SEM NRF — botao fisico
   // ========================================================
-  if (digitalRead(PIN_BTN_ANCORA) == LOW && (millis() - lastBtnPress) > debounceMs) {
-    lastBtnPress = millis();
-    if (!anchorMode) ativarAncora(); else desativarAncora();
-    delay(300);
-  }
 
   #ifdef LOG_ENABLE
     if (!anchorMode && (millis() - lastStatusPrint) > 2000) {
@@ -1172,18 +1184,20 @@ void loop() {
   }
 
   // ========================================================
-  //         APONTA NORTE (ativado via NRF cadastro)
+  //         APONTA NORTE — modo calibração bússola
+  //         PWM fixo 120, histerese 5°, ativado via BLE $APN
   // ========================================================
   if (apontaNorteMode && !anchorMode && !northMode) {
     double erroNorte = 0.0 - (double)heading;
     if (erroNorte >  180.0) erroNorte -= 360.0;
     if (erroNorte < -180.0) erroNorte += 360.0;
-    if (abs(erroNorte) <= headingDeadzone) {
-      motorWrite(left, 0); motorWrite(right, 0); giroIntegral = 0;
+    const int    pwmCalib   = 120;
+    const double histerese  = 5.0;
+    if (abs(erroNorte) <= histerese) {
+      motorWrite(left, 0); motorWrite(right, 0);
     } else {
-      int pwmGiro = calcPidGiro(erroNorte);
-      if (erroNorte > 0) { motorWrite(right, pwmGiro); motorWrite(left,  0); }
-      else               { motorWrite(left,  pwmGiro); motorWrite(right, 0); }
+      if (erroNorte > 0) { motorWrite(right, pwmCalib); motorWrite(left,  0); }
+      else               { motorWrite(left,  pwmCalib); motorWrite(right, 0); }
     }
   }
 
