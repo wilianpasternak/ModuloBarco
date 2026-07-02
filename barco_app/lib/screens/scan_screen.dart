@@ -24,6 +24,9 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _requestPermissions() async {
+    // Android: permissoes separadas de scan/connect/location
+    // iOS: permissao BLE e concedida pelo sistema quando o scan inicia;
+    //      permission_handler so precisa da localizacao no iOS
     await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
@@ -31,20 +34,36 @@ class _ScanScreenState extends State<ScanScreen> {
     ].request();
   }
 
+  // Retorna true se o resultado e o ModuloBarco
+  bool _isModuloBarco(ScanResult r) {
+    // iOS pode retornar o nome em platformName ou em advertisementData.localName
+    final name1 = r.device.platformName;
+    final name2 = r.advertisementData.advName;
+    return name1 == 'ModuloBarco' || name2 == 'ModuloBarco';
+  }
+
   Future<void> _startScan() async {
     setState(() { _results.clear(); _scanning = true; });
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+
+    // withServices filtra pelo UUID do servico BLE — funciona em iOS e Android
+    // evita que iOS ignore dispositivos cujo nome so aparece no scan response
+    await FlutterBluePlus.startScan(
+      withServices: [Guid('0000ffe0-0000-1000-8000-00805f9b34fb')],
+      timeout: const Duration(seconds: 10),
+    );
+
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         for (final r in results) {
-          if (r.device.platformName != 'ModuloBarco') continue;
+          if (!_isModuloBarco(r)) continue;
           if (!_results.any((e) => e.device.remoteId == r.device.remoteId)) {
             _results.add(r);
           }
         }
       });
     });
-    await Future.delayed(const Duration(seconds: 8));
+
+    await Future.delayed(const Duration(seconds: 10));
     await FlutterBluePlus.stopScan();
     setState(() => _scanning = false);
   }
