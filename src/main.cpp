@@ -150,7 +150,7 @@ bool          upAtivo   = false;
 bool          downAtivo = false;
 unsigned long lastGiroCmdTime   = 0;
 unsigned long lastUpDownCmdTime = 0;
-const unsigned long holdTimeout = 300;  // ms sem novo comando para parar
+const unsigned long holdTimeout = 150;  // ms sem novo comando para parar
 
 // ================= TELEMETRIA / BUFFER RX =================
 unsigned long lastTelemetryTime = 0;
@@ -727,7 +727,7 @@ void setup() {
   #ifdef LOG_ENABLE
     Serial.println(F("[5] NimBLE..."));
   #endif
-  NimBLEDevice::init("ModuloBarco");
+  NimBLEDevice::init("BragaPesca");
   NimBLEServer*  pServer  = NimBLEDevice::createServer();
   pServer->setCallbacks(new BleServerCallbacks());
   NimBLEService* pService = pServer->createService(BLE_SVC_UUID);
@@ -980,7 +980,7 @@ void loop() {
       else if (pwmRampAtual < pwmAlvo) pwmRampAtual = min(pwmRampAtual + pwmRampStep, pwmAlvo);
       else pwmRampAtual = pwmAlvo;
 
-      bool motorAlinhado = zonamorta || (bearingReady && abs(anchorHeadError) <= 18.0);
+      bool motorAlinhado = zonamorta || (bearingReady && abs(anchorHeadError) <= 13.0);
       pwmComHeading = motorAlinhado ? pwmRampAtual : 0;
       motorWrite(acelerador, pwmComHeading);
 
