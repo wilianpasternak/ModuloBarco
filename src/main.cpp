@@ -812,12 +812,12 @@ void setup() {
         Serial.println(F("             Verifique fiacao SPI / alimentacao 3.3V"));
       #endif
     } else {
-      radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
+      //radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
       radio.setDataRate(RF24_250KBPS);
-      radio.setPALevel(RF24_PA_MAX);
-      radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
+      //radio.setPALevel(RF24_PA_MAX);
+     // radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
       // Pipe 0 é reservado para TX/ACK — usar pipe 1 para recepção
-      radio.openReadingPipe(1, address);
+      radio.openReadingPipe(0, address);
       radio.startListening();
       carregarControlesNVS();
       bootTime = millis();
@@ -948,6 +948,20 @@ void loop() {
     char idStr[6];
     memcpy(idStr, &text[12], 5); idStr[5] = '\0';
     uint32_t controlID = (uint32_t)atoi(idStr);
+
+    #ifdef LOG_ENABLE
+    {
+      Serial.print(F("[NRF] PACOTE recebido! ID="));
+      Serial.print(controlID);
+      Serial.print(F(" bytes=["));
+      for (int _i = 0; _i < 18; _i++) {
+        Serial.print((uint8_t)text[_i]);
+        if (_i < 17) Serial.print(',');
+      }
+      Serial.print(F("] autorizado="));
+      Serial.println(controleAutorizado(controlID) ? F("SIM") : F("NAO (nao cadastrado)"));
+    }
+    #endif
 
     if (modoCadastro) {
       if      (text[0]=='1'){ salvarControle(0,controlID); modoCadastro=false; delay(2000); return; }
