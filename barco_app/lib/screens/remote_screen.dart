@@ -108,6 +108,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
           // PAINEL SUPERIOR  —  Acelerador + Giro + Motor
           // ══════════════════════════════════════════════════════════
           _GoldPanel(
+            verticalPadding: 28,
             child: Column(
               children: [
                 // + (Acelerar) — pill
@@ -116,26 +117,21 @@ class _RemoteScreenState extends State<RemoteScreen> {
                   onStart: () => _startAcel(true),
                   onStop:  _stopAcel,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
 
                 // ◄  Motor  ►
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Giro esquerda
                     _ArrowHoldBtn(
                       icon: Icons.arrow_back_ios_rounded,
                       onStart: () => _startGiro(false),
                       onStop:  _stopGiro,
                     ),
-
-                    // Motor (centro — toque simples)
                     _MotorCircleBtn(
                       active: motorActive,
                       onTap: widget.ble.sendToggleMotor,
                     ),
-
-                    // Giro direita
                     _ArrowHoldBtn(
                       icon: Icons.arrow_forward_ios_rounded,
                       onStart: () => _startGiro(true),
@@ -143,7 +139,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
 
                 // - (Desacelerar) — pill
                 _PillHoldBtn(
@@ -155,15 +151,15 @@ class _RemoteScreenState extends State<RemoteScreen> {
             ),
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 32),
 
           // ══════════════════════════════════════════════════════════
           // PAINEL INFERIOR  —  Ancora + Norte + Subir + Descer
           // ══════════════════════════════════════════════════════════
           _GoldPanel(
+            verticalPadding: 14,
             child: Column(
               children: [
-                // Ancora  |  Norte (mira)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -172,18 +168,21 @@ class _RemoteScreenState extends State<RemoteScreen> {
                       label: 'ÂNCORA',
                       active: anchorActive,
                       onTap: _toggleAnchor,
+                      size: 58,
+                      iconSize: 26,
                     ),
                     _CircleToggleBtn(
                       icon: Icons.gps_fixed,
                       label: 'NORTE',
                       active: northActive,
                       onTap: widget.ble.sendToggleNorth,
+                      size: 58,
+                      iconSize: 26,
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
 
-                // Linha com marca e botoes subir/descer
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -192,8 +191,9 @@ class _RemoteScreenState extends State<RemoteScreen> {
                       label: 'SUBIR',
                       onStart: widget.ble.sendUpStart,
                       onStop:  widget.ble.sendUpStop,
+                      size: 58,
+                      iconSize: 30,
                     ),
-                    // Marca central
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: const [
@@ -212,6 +212,8 @@ class _RemoteScreenState extends State<RemoteScreen> {
                       label: 'DESCER',
                       onStart: widget.ble.sendDownStart,
                       onStop:  widget.ble.sendDownStop,
+                      size: 58,
+                      iconSize: 30,
                     ),
                   ],
                 ),
@@ -229,13 +231,14 @@ class _RemoteScreenState extends State<RemoteScreen> {
 // ── Painel com borda dourada arredondada ─────────────────────────────────────
 class _GoldPanel extends StatelessWidget {
   final Widget child;
-  const _GoldPanel({required this.child});
+  final double verticalPadding;
+  const _GoldPanel({required this.child, this.verticalPadding = 22});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+      padding: EdgeInsets.symmetric(horizontal: 28, vertical: verticalPadding),
       decoration: BoxDecoration(
         color: _kPanel,
         borderRadius: BorderRadius.circular(60),
@@ -271,10 +274,10 @@ class _PillHoldBtnState extends State<_PillHoldBtn> {
       onPointerCancel: (_) { setState(() => _pressed = false); widget.onStop();  },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 80),
-        height: 46,
+        height: 52,
         decoration: BoxDecoration(
           color: _pressed ? _kGold : Colors.transparent,
-          borderRadius: BorderRadius.circular(23),
+          borderRadius: BorderRadius.circular(26),
           border: Border.all(color: _pressed ? _kGold : _kGoldDim, width: 2),
         ),
         child: Center(
@@ -282,7 +285,7 @@ class _PillHoldBtnState extends State<_PillHoldBtn> {
             widget.label,
             style: TextStyle(
               color: _pressed ? _kDark : _kGold,
-              fontSize: 26,
+              fontSize: 28,
               fontWeight: FontWeight.bold,
               height: 1,
             ),
@@ -315,7 +318,7 @@ class _ArrowHoldBtnState extends State<_ArrowHoldBtn> {
       onPointerCancel: (_) { setState(() => _pressed = false); widget.onStop();  },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 80),
-        width: 70, height: 70,
+        width: 84, height: 84,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: _pressed ? _kGold : Colors.transparent,
@@ -323,7 +326,7 @@ class _ArrowHoldBtnState extends State<_ArrowHoldBtn> {
         ),
         child: Icon(widget.icon,
           color: _pressed ? _kDark : _kGold,
-          size: 30,
+          size: 38,
         ),
       ),
     );
@@ -376,9 +379,12 @@ class _CircleToggleBtn extends StatefulWidget {
   final String label;
   final bool active;
   final Future<void> Function() onTap;
+  final double size;
+  final double iconSize;
   const _CircleToggleBtn({
     required this.icon, required this.label,
     required this.active, required this.onTap,
+    this.size = 72, this.iconSize = 34,
   });
 
   @override
@@ -400,7 +406,7 @@ class _CircleToggleBtnState extends State<_CircleToggleBtn> {
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            width: 72, height: 72,
+            width: widget.size, height: widget.size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: active ? _kGold : (_pressed ? _kGoldDim : Colors.transparent),
@@ -411,7 +417,7 @@ class _CircleToggleBtnState extends State<_CircleToggleBtn> {
             ),
             child: Icon(widget.icon,
               color: active ? _kDark : _kGold,
-              size: 34,
+              size: widget.iconSize,
             ),
           ),
           const SizedBox(height: 5),
@@ -433,9 +439,12 @@ class _CircleHoldBtn extends StatefulWidget {
   final String label;
   final Future<void> Function() onStart;
   final Future<void> Function() onStop;
+  final double size;
+  final double iconSize;
   const _CircleHoldBtn({
     required this.icon, required this.label,
     required this.onStart, required this.onStop,
+    this.size = 72, this.iconSize = 38,
   });
 
   @override
@@ -456,7 +465,7 @@ class _CircleHoldBtnState extends State<_CircleHoldBtn> {
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 80),
-            width: 72, height: 72,
+            width: widget.size, height: widget.size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: _pressed ? _kGold : Colors.transparent,
@@ -464,7 +473,7 @@ class _CircleHoldBtnState extends State<_CircleHoldBtn> {
             ),
             child: Icon(widget.icon,
               color: _pressed ? _kDark : _kGold,
-              size: 38,
+              size: widget.iconSize,
             ),
           ),
           const SizedBox(height: 5),
