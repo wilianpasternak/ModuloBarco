@@ -530,7 +530,7 @@ class _Stat extends StatelessWidget {
     return Expanded(child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: _kGoldDim, size: 13),
+        Icon(icon, color: Colors.green.shade400, size: 13),
         const SizedBox(height: 2),
         Text(value, style: TextStyle(color: valueColor ?? _kGold, fontSize: 12, fontWeight: FontWeight.bold)),
         Text(label, style: const TextStyle(color: _kGoldDim, fontSize: 9)),
