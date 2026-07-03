@@ -52,6 +52,9 @@ class BleService {
     _device = device;
     _connectionController.add(true);
 
+    // Salva imediatamente após conexão, antes de discoverServices() que pode falhar
+    await BleService.saveDevice(device.remoteId.str);
+
     // Solicita MTU máximo em ambas as plataformas
     // Android: obrigatório via requestMtu; iOS: negocia automaticamente mas requestMtu acelera o processo
     try { await device.requestMtu(512); } catch (_) {}  // iOS pode lançar exceção em alguns casos
@@ -77,8 +80,6 @@ class BleService {
         }
       }
     }
-
-    await BleService.saveDevice(device.remoteId.str);
 
     // Solicita valores de configuração (HMN, VER) — firmware responde com $HMN:XX e $VER:XX
     // Delay necessário: firmware pode ainda não ter processado o evento de conexão

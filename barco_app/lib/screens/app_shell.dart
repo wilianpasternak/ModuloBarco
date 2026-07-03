@@ -43,7 +43,7 @@ class _AppShellState extends State<AppShell> {
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
     if (widget.autoReconnect) {
-      Future.microtask(_reconnect);
+      Future.delayed(const Duration(milliseconds: 600), _reconnect);
     }
   }
 
@@ -92,10 +92,13 @@ class _AppShellState extends State<AppShell> {
       await widget.ble.connect(target);
       if (mounted) setState(() { _isConnected = true; _isReconnecting = false; });
     } catch (_) {
-      if (mounted) setState(() => _isReconnecting = false);
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ScanScreen()),
+        setState(() { _isReconnecting = false; _isConnected = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Motor não encontrado. Verifique se está ligado e toque em wifi para tentar novamente.'),
+            duration: Duration(seconds: 5),
+          ),
         );
       }
     }
