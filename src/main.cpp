@@ -1,7 +1,7 @@
 // ================= DEFINES =================
-//#define USE_NRF     // Descomente para ativar radio NRF24L01
+#define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.14"
+#define FIRMWARE_VERSION "1.1.22"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -126,7 +126,7 @@ const double headingDeadzone = 8.0;
 float northHeadingTarget     = 0;
 
 // ================= PID DISTANCIA =================
-double Kp_dist = 18.0, Ki_dist = 0.3, Kd_dist = 2.0;
+double Kp_dist = 22.0, Ki_dist = 0.3, Kd_dist = 3.0;
 double distIntegral = 0, lastDistError = 0;
 const int pwmMax = 255;
 double pwmFiltered = 0;
@@ -498,16 +498,35 @@ void processBlecmd(const String& cmd) {
     } else {
       motorWrite(acelerador, pwmMotorOff);
     }
+    #ifdef USE_BUZZER
+    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+      digitalWrite(buz, LOW);
+      buzzerAtivo = false;
+    }
+  #endif
+
   }
   // --- Aceleracao ---
   else if (cmd == "$ACE+") {
     aceleracao = constrain(aceleracao + 5, 0, 255);
     if (motorLigado) motorWrite(acelerador, aceleracao);
+    #ifdef USE_BUZZER
+    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+      digitalWrite(buz, LOW);
+      buzzerAtivo = false;
+    }
+  #endif
   }
   else if (cmd == "$ACE-") {
     int minAcel = motorLigado ? pwmHeliceMin : 0;
     aceleracao = constrain(aceleracao - 5, minAcel, 255);
     if (motorLigado) motorWrite(acelerador, aceleracao);
+    #ifdef USE_BUZZER
+    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+      digitalWrite(buz, LOW);
+      buzzerAtivo = false;
+    }
+  #endif
   }
   // --- Giro direita ---
   else if (cmd == "$GTR+") {
@@ -515,6 +534,12 @@ void processBlecmd(const String& cmd) {
       giroDir = true; giroEsq = false;
       motorWrite(right, 230); motorWrite(left, 0);
       lastGiroCmdTime = millis();
+      #ifdef USE_BUZZER
+    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+      digitalWrite(buz, LOW);
+      buzzerAtivo = false;
+    }
+  #endif
     }
   }
   else if (cmd == "$GTR-") {
@@ -527,6 +552,12 @@ void processBlecmd(const String& cmd) {
       giroEsq = true; giroDir = false;
       motorWrite(left, 230); motorWrite(right, 0);
       lastGiroCmdTime = millis();
+      #ifdef USE_BUZZER
+    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+      digitalWrite(buz, LOW);
+      buzzerAtivo = false;
+    }
+  #endif
     }
   }
   else if (cmd == "$GTL-") {
@@ -775,15 +806,31 @@ void setup() {
       Serial.println(F("[3] NRF24L01 (VSPI CE=14 CSN=15 SCK=18 MISO=19 MOSI=23)..."));
     #endif
     vspiNrf.begin(NRF_SCK_PIN, NRF_MISO_PIN, NRF_MOSI_PIN, NRF_CSN_PIN);
-    radio.begin(&vspiNrf);
-    radio.openReadingPipe(0, address);
-    radio.setDataRate(RF24_250KBPS);
-    radio.startListening();
-    carregarControlesNVS();
-    bootTime = millis();
-    #ifdef LOG_ENABLE
-      Serial.println(F("  NRF24L01 : OK"));
-    #endif
+    if (!radio.begin(&vspiNrf)) {
+      #ifdef LOG_ENABLE
+        Serial.println(F("  NRF24L01 : ** FALHA NA INICIALIZACAO **"));
+        Serial.println(F("             Verifique fiacao SPI / alimentacao 3.3V"));
+      #endif
+    } else {
+      radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
+      radio.setDataRate(RF24_250KBPS);
+      radio.setPALevel(RF24_PA_MAX);
+      radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
+      // Pipe 0 é reservado para TX/ACK — usar pipe 1 para recepção
+      radio.openReadingPipe(1, address);
+      radio.startListening();
+      carregarControlesNVS();
+      bootTime = millis();
+      #ifdef LOG_ENABLE
+        Serial.println(F("  NRF24L01 : OK"));
+        Serial.print(F("    isChipConnected : ")); Serial.println(radio.isChipConnected() ? F("sim") : F("NAO"));
+        Serial.print(F("    Canal           : ")); Serial.println(radio.getChannel());
+        Serial.print(F("    DataRate        : ")); Serial.println(radio.getDataRate() == RF24_250KBPS ? F("250KBPS") : F("outro"));
+        Serial.print(F("    PayloadSize     : ")); Serial.println(radio.getPayloadSize());
+        Serial.print(F("    Endereco (pipe1): ")); Serial.println((char*)address);
+        radio.printDetails();
+      #endif
+    }
   #endif
 
   // --- HMC5883L ---
@@ -841,35 +888,12 @@ void setup() {
     Serial.println(F("Pronto.\n"));
   #endif
 
-  #ifdef USE_BUZZER
-    for (int i = 0; i < 2; i++) {
-      digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
-    }
+  //#ifdef USE_BUZZER
+   // for (int i = 0; i < 5; i++) {
+   //   digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
+  //  }
     
-  #endif
-
-  motorWrite(left, 140); motorWrite(right, 0);
-  delay(600);
-  motorWrite(left, 0); motorWrite(right, 140);
-  delay(600);
-  motorWrite(left, 0); motorWrite(right, 0);
-  
-
-
-  delay(1000);
-  motorWrite(left, 140); motorWrite(right, 0);
-  delay(1000);
-  motorWrite(left, 0); motorWrite(right, 140);
-  delay(1000);
-  motorWrite(left, 0); motorWrite(right, 0);
-  
-
-  delay(1000);
-  motorWrite(left, 140); motorWrite(right, 0);
-  delay(1000);
-  motorWrite(left, 0); motorWrite(right, 140);
-  delay(1000);
-  motorWrite(left, 0); motorWrite(right, 0);
+  //#endif
 }
 
 // ================= LOOP =================
@@ -905,6 +929,19 @@ void loop() {
   #ifdef USE_NRF
   if (millis() - bootTime > cadastroTimeout) modoCadastro = false;
 
+  #ifdef LOG_ENABLE
+  {
+    static unsigned long _nrfDbg = 0;
+    if (millis() - _nrfDbg > 2000) {
+      _nrfDbg = millis();
+      Serial.print(F("[NRF] chip="));     Serial.print(radio.isChipConnected() ? F("OK") : F("FALHA"));
+      Serial.print(F(" avail="));         Serial.print(radio.available());
+      Serial.print(F(" rxMode="));         Serial.print(radio.available() >= 0 ? F("RX") : F("?"));
+      Serial.print(F(" modoCadastro="));  Serial.println(modoCadastro);
+    }
+  }
+  #endif
+
   if (radio.available()) {
     char text[18] = {0};
     radio.read(&text, sizeof(text));
@@ -935,7 +972,7 @@ void loop() {
 
     char *cmd = &text[0];
     #ifdef USE_BUZZER
-      beep(0);
+    //  beep(0);
     #endif
 
     if (cmd[7]=='1' && !northMode) {
