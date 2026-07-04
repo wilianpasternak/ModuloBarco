@@ -1,7 +1,9 @@
 // ================= DEFINES =================
-#define USE_NRF     // Descomente para ativar radio NRF24L01
-#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.29"
+//#define USE_NRF     // Descomente para ativar radio NRF24L01
+//#define LOG_ENABLE    // Habilita debug via Serial
+#define FIRMWARE_VERSION "1.1.34"
+// Incremente GPS_CONFIG_VERSION para forcar reconfigurar o GPS no proximo boot
+#define GPS_CONFIG_VERSION 1
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -771,26 +773,67 @@ void setup() {
   #ifdef LOG_ENABLE
     Serial.println(F("[1] GPS Serial..."));
   #endif
-  Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-  delay(500);
-  // UBX-CFG-RATE: 250ms = 4Hz
-  static const uint8_t ubxRate4Hz[] = {
-    0xB5,0x62, 0x06,0x08, 0x06,0x00, 0xFA,0x00, 0x01,0x00, 0x01,0x00, 0x10,0x96
+  // UBX-CFG-PRT: muda baud do modulo para 38400 (enviado em 9600)
+  static const uint8_t ubxCfgPrt38400[] = {
+    0xB5,0x62, 0x06,0x00, 0x14,0x00,
+    0x01,0x00,0x00,0x00,              // portID=1 (UART1), reserved, txReady
+    0xC0,0x08,0x00,0x00,              // mode: 8N1
+    0x00,0x96,0x00,0x00,              // baudRate: 38400 LE
+    0x07,0x00,                        // inProtoMask: UBX+NMEA+RTCM
+    0x03,0x00,                        // outProtoMask: UBX+NMEA
+    0x00,0x00,0x00,0x00,              // flags, reserved5
+    0x83,0x90                         // checksum (verificado)
   };
-  Serial2.write(ubxRate4Hz, sizeof(ubxRate4Hz));
-  // UBX-CFG-CFG: salva na flash do GPS (persiste apos desligar)
+  // UBX-CFG-RATE: 200ms = 5Hz (enviado em 38400)
+  static const uint8_t ubxRate5Hz[] = {
+    0xB5,0x62, 0x06,0x08, 0x06,0x00,
+    0xC8,0x00,                        // measRate: 200ms
+    0x01,0x00,                        // navRate: 1
+    0x01,0x00,                        // timeRef: GPS
+    0xDE,0x6A                         // checksum (verificado)
+  };
+  // UBX-CFG-CFG: salva tudo na flash do modulo GPS
   static const uint8_t ubxSave[] = {
     0xB5,0x62, 0x06,0x09, 0x0D,0x00,
-    0x00,0x00,0x00,0x00,  // clearMask
-    0xFF,0xFF,0x00,0x00,  // saveMask
-    0x00,0x00,0x00,0x00,  // loadMask
-    0x17,                  // deviceMask
-    0x31,0xBF              // checksum
+    0x00,0x00,0x00,0x00,              // clearMask: nada
+    0xFF,0xFF,0x00,0x00,              // saveMask: tudo
+    0x00,0x00,0x00,0x00,              // loadMask: nada
+    0x17,                             // deviceMask: BBR+Flash+EEPROM
+    0x31,0xBF                         // checksum (verificado)
   };
-  Serial2.write(ubxSave, sizeof(ubxSave));
-  #ifdef LOG_ENABLE
-    Serial.println(F("  GPS : rate 4Hz configurado"));
-  #endif
+
+  prefs.begin("barco", true);
+  uint8_t gpsCfgVer = prefs.getUChar("gpsCfgVer", 0);
+  prefs.end();
+
+  if (gpsCfgVer != GPS_CONFIG_VERSION) {
+    // Primeira vez (ou nova versao de config): configura baud + rate
+    Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    delay(500);
+    Serial2.write(ubxCfgPrt38400, sizeof(ubxCfgPrt38400));
+    Serial2.flush();
+    delay(200);                       // GPS precisa trocar baud antes do proximo comando
+    Serial2.end();
+    Serial2.begin(38400, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    delay(100);
+    Serial2.write(ubxRate5Hz, sizeof(ubxRate5Hz));
+    delay(100);
+    Serial2.write(ubxSave, sizeof(ubxSave));
+    delay(300);                       // GPS precisa gravar na flash interna
+    prefs.begin("barco", false);
+    prefs.putUChar("gpsCfgVer", GPS_CONFIG_VERSION);
+    prefs.end();
+    #ifdef LOG_ENABLE
+      Serial.println(F("  GPS: configurado 38400 baud / 5Hz e salvo na flash"));
+    #endif
+  } else {
+    // GPS ja configurado: sobe direto em 38400
+    Serial2.begin(38400, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    delay(100);
+    #ifdef LOG_ENABLE
+      Serial.println(F("  GPS: ja configurado (38400 / 5Hz)"));
+    #endif
+  }
 
   // --- Wire / I2C ---
   #ifdef LOG_ENABLE
@@ -1137,11 +1180,11 @@ void loop() {
   }
 
   // ========================================================
-  //         ANCORA — CICLO GPS (500ms)
+  //         ANCORA — CICLO GPS (200ms = 5Hz)
   // ========================================================
   if (anchorMode && gps.location.isValid()) {
     long now = millis();
-    if (now - lastGPSTime >= 500) {
+    if (now - lastGPSTime >= 200) {
       double dt_pid = constrain((now - lastGPSTime) / 1000.0, 0.05, 2.0);
       lastGPSTime   = now;
 
