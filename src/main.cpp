@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.25"
+#define FIRMWARE_VERSION "1.1.27"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -266,6 +266,9 @@ void calibrarBussola() {
   long t0 = millis();
   motorWrite(left, 140); motorWrite(right, 0);
   while (millis() - t0 < 9500) {
+    #ifdef USE_NRF
+      tempoLigadoGiro = millis();  // impede NRF timeout de parar o motor durante calibracao
+    #endif
     float mx, my;
     if (hmc5883l_readRaw(mx, my)) {
       minX = min(minX, mx); maxX = max(maxX, mx);
@@ -281,6 +284,9 @@ void calibrarBussola() {
   t0 = millis();
   motorWrite(left, 0); motorWrite(right, 140);
   while (millis() - t0 < 9500) {
+    #ifdef USE_NRF
+      tempoLigadoGiro = millis();  // impede NRF timeout de parar o motor durante calibracao
+    #endif
     float mx, my;
     if (hmc5883l_readRaw(mx, my)) {
       minX = min(minX, mx); maxX = max(maxX, mx);
