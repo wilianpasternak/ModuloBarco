@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.27"
+#define FIRMWARE_VERSION "1.1.29"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -93,6 +93,7 @@ size_t otaBytesReceived = 0;
 bool anchorMode  = false;
 bool northMode   = false;
 bool motorLigado = false;
+volatile bool calibrando = false;
 
 // ================= ANCORA =================
 double anchorLat = 0;
@@ -256,6 +257,7 @@ void carregarCalibracaoBussola() {
 }
 
 void calibrarBussola() {
+  calibrando = true;
   #ifdef LOG_ENABLE
     Serial.println(F("\n[CALIBRACAO] Iniciando — gira motor 360 em cada sentido"));
   #endif
@@ -308,6 +310,7 @@ void calibrarBussola() {
   prefs.putFloat("compYoff", compassYOffset);
   prefs.putBool("compCalib", true);
   prefs.end();
+  calibrando = false;
   #ifdef LOG_ENABLE
     Serial.print(F("[CALIBRACAO] OK — Xoff=")); Serial.print(compassXOffset, 2);
     Serial.print(F(" Yoff=")); Serial.print(compassYOffset, 2);
@@ -1085,8 +1088,10 @@ void loop() {
       if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
       if (cmd[1]=='1'){ motorWrite(left,230); motorWrite(right,0); tempoLigadoGiro=millis(); }
       else if (cmd[2]=='1'){ motorWrite(right,230); motorWrite(left,0); tempoLigadoGiro=millis(); }
+      else if (!giroDir && !giroEsq && !calibrando){ motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis(); }
       if (cmd[5]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
-      if (cmd[6]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
+      else if (cmd[6]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
+      else if (!upAtivo && !downAtivo){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
     }
   }
 

@@ -40,14 +40,23 @@ class _RemoteScreenState extends State<RemoteScreen> {
     if (plus) { widget.ble.sendAcelPlus(); } else { widget.ble.sendAcelMinus(); }
   }
 
-  // ── Giro hold (reenvia 100ms; firmware para pelo holdTimeout) ───
+  // ── Giro hold (reenvia 100ms; envia stop explicito ao soltar) ───
+  Future<void> Function()? _giroStop;
+
   void _startGiro(bool right) {
+    _giroTimer?.cancel();
     final send = right ? widget.ble.sendGiroDirStart : widget.ble.sendGiroEsqStart;
+    _giroStop = right ? widget.ble.sendGiroDirStop : widget.ble.sendGiroEsqStop;
     send();
     _giroTimer = Timer.periodic(const Duration(milliseconds: 100), (_) => send());
   }
 
-  void _stopGiro() { _giroTimer?.cancel(); _giroTimer = null; }
+  void _stopGiro() {
+    _giroTimer?.cancel();
+    _giroTimer = null;
+    _giroStop?.call();
+    _giroStop = null;
+  }
 
   Future<void> _toggleAnchor() async {
     final tel = widget.tel;
@@ -86,6 +95,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
   void dispose() {
     _acelTimer?.cancel();
     _giroTimer?.cancel();
+    _giroStop = null;
     super.dispose();
   }
 
