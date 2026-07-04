@@ -949,27 +949,31 @@ void loop() {
   // --- GPS ---
   #ifdef LOG_ENABLE
   {
-    static unsigned long _gpsLastUpdate = 0;
-    static unsigned long _gpsLastPrint  = 0;
-    static float         _gpsHz         = 0;
+    // Mede epochs reais: o tempo GPS muda exatamente 1x por epoch
+    // (GGA e RMC do mesmo epoch tem o mesmo valor de tempo)
+    static uint32_t      _lastGpsTimeVal = 0xFFFFFFFF;
+    static int           _epochCount     = 0;
+    static unsigned long _windowStart    = 0;
+    static float         _gpsHz          = 0;
+    static unsigned long _gpsLastPrint   = 0;
     while (Serial2.available()) {
-      if (gps.encode(Serial2.read()) && gps.location.isUpdated()) {
-        unsigned long now = millis();
-        if (_gpsLastUpdate > 0) {
-          unsigned long interval = now - _gpsLastUpdate;
-          _gpsHz = (interval > 0) ? 1000.0f / interval : 0;
-        }
-        _gpsLastUpdate = now;
+      if (gps.encode(Serial2.read()) && gps.time.isUpdated()) {
+        uint32_t tv = gps.time.value();
+        if (tv != _lastGpsTimeVal) { _lastGpsTimeVal = tv; _epochCount++; }
       }
     }
-    if (millis() - _gpsLastPrint > 3000) {
-      _gpsLastPrint = millis();
-      Serial.print(F("[GPS] rate="));
-      Serial.print(_gpsHz, 2);
-      Serial.print(F("Hz  sentences="));
-      Serial.print(gps.sentencesWithFix());
-      Serial.print(F("  chars="));
-      Serial.println(gps.charsProcessed());
+    unsigned long _now = millis();
+    if (_windowStart == 0) _windowStart = _now;
+    if (_now - _windowStart >= 4000) {
+      _gpsHz = _epochCount / ((_now - _windowStart) / 1000.0f);
+      _epochCount = 0; _windowStart = _now;
+    }
+    if (_now - _gpsLastPrint >= 4000) {
+      _gpsLastPrint = _now;
+      Serial.print(F("[GPS] rate="));   Serial.print(_gpsHz, 2);
+      Serial.print(F("Hz  fix="));      Serial.print(gps.location.isValid() ? F("SIM") : F("NAO"));
+      Serial.print(F("  sats="));       Serial.print(gps.satellites.value());
+      Serial.print(F("  chars="));      Serial.println(gps.charsProcessed());
     }
   }
   #else
