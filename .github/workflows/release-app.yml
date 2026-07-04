@@ -1,0 +1,127 @@
+name: Release App
+
+# Disparado pelo script scripts/release-app.sh ao empurrar uma tag app-v*
+on:
+  push:
+    tags:
+      - 'app-v*'
+
+jobs:
+  # ── Job 1: Android APK ────────────────────────────────────────────────────
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.6'
+          channel: 'stable'
+          cache: true
+
+      - name: Instalar dependências
+        working-directory: barco_app
+        run: flutter pub get
+
+      - name: Build APK release
+        working-directory: barco_app
+        run: flutter build apk --release
+
+      - name: Renomear APK com versão
+        run: |
+          VERSION="${{ github.ref_name }}"           # ex: app-v1.0.1
+          VERSION="${VERSION#app-v}"                  # ex: 1.0.1
+          mv barco_app/build/app/outputs/flutter-apk/app-release.apk \
+             BragaPesca-${VERSION}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: BragaPesca-*.apk
+          retention-days: 1
+
+  # ── Job 2: iOS IPA ────────────────────────────────────────────────────────
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.6'
+          channel: 'stable'
+          cache: true
+
+      - name: Instalar dependências
+        working-directory: barco_app
+        run: flutter pub get
+
+      - name: Build iOS sem assinatura
+        working-directory: barco_app
+        run: flutter build ios --release --no-codesign
+
+      - name: Empacotar IPA não-assinado
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#app-v}"
+          mkdir -p Payload
+          cp -r barco_app/build/ios/iphoneos/Runner.app Payload/
+          zip -r BragaPesca-${VERSION}.ipa Payload/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: BragaPesca-*.ipa
+          retention-days: 1
+
+  # ── Job 3: Cria o release com os dois artefatos ────────────────────────────
+  release:
+    name: Publicar Release
+    needs: [build-android, build-ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Baixar APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/
+
+      - name: Baixar IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: artifacts/
+
+      - name: Criar release no GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#app-v}"
+          APK="artifacts/BragaPesca-${VERSION}.apk"
+          IPA="artifacts/BragaPesca-${VERSION}.ipa"
+
+          gh release create "${{ github.ref_name }}" \
+            "$APK" \
+            "$IPA" \
+            --title "App Braga Pesca v${VERSION}" \
+            --notes "## App Braga Pesca v${VERSION}
+
+### Android
+Baixe o arquivo **BragaPesca-${VERSION}.apk** e instale diretamente no dispositivo.
+> Habilite \"Fontes desconhecidas\" em Configurações → Segurança se necessário.
+
+### iOS
+O arquivo **BragaPesca-${VERSION}.ipa** é não-assinado — instalação via **AltStore** ou **Sideloadly**.
+> Não disponível na App Store. Requer re-sign anual se usar conta Apple gratuita."
