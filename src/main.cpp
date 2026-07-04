@@ -1,9 +1,9 @@
 // ================= DEFINES =================
-//#define USE_NRF     // Descomente para ativar radio NRF24L01
+#define USE_NRF     // Descomente para ativar radio NRF24L01
 //#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.34"
+#define FIRMWARE_VERSION "1.1.40"
 // Incremente GPS_CONFIG_VERSION para forcar reconfigurar o GPS no proximo boot
-#define GPS_CONFIG_VERSION 1
+#define GPS_CONFIG_VERSION 6
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
