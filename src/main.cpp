@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.23"
+#define FIRMWARE_VERSION "1.1.24"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -788,6 +788,7 @@ void setup() {
     Serial.println(F("[2] Wire / Pinos..."));
   #endif
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setClock(50000);  // 50kHz — mais tolerante a ruido em ambiente com motor/ESC
   Wire.setTimeout(100);
 
   // --- Pinos de saida ---
