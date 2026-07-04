@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.24"
+#define FIRMWARE_VERSION "1.1.25"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -156,7 +156,7 @@ bool          upAtivo   = false;
 bool          downAtivo = false;
 unsigned long lastGiroCmdTime   = 0;
 unsigned long lastUpDownCmdTime = 0;
-const unsigned long holdTimeout = 250;  // ms sem novo comando para parar
+const unsigned long holdTimeout = 150;  // ms sem novo comando para parar
 
 // ================= TELEMETRIA / BUFFER RX =================
 unsigned long lastTelemetryTime = 0;
@@ -1053,11 +1053,11 @@ void loop() {
     }
   }
 
-  // Timeouts hold NRF
-  if (!anchorMode && !northMode && (millis()-tempoLigadoUpDown) > 150) {
+  // Timeouts hold NRF — só agem se BLE nao estiver controlando o mesmo atuador
+  if (!anchorMode && !northMode && !upAtivo && !downAtivo && (millis()-tempoLigadoUpDown) > 150) {
     digitalWrite(pinUp,LOW); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis();
   }
-  if (!anchorMode && !northMode && (millis()-tempoLigadoGiro) > 150) {
+  if (!anchorMode && !northMode && !giroDir && !giroEsq && (millis()-tempoLigadoGiro) > 150) {
     motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis();
   }
 
