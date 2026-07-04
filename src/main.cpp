@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.22"
+#define FIRMWARE_VERSION "1.1.23"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -39,7 +39,7 @@ const int pinDown    = 13;   // Descer (digital HIGH=ativo)
 
 #ifdef USE_NRF
   #define NRF_CE_PIN   14    // CE
-  #define NRF_CSN_PIN  15    // CSN / SS
+  #define NRF_CSN_PIN  5    // CSN / SS
   #define NRF_SCK_PIN  18    // VSPI SCK
   #define NRF_MISO_PIN 19    // VSPI MISO
   #define NRF_MOSI_PIN 23    // VSPI MOSI
@@ -156,7 +156,7 @@ bool          upAtivo   = false;
 bool          downAtivo = false;
 unsigned long lastGiroCmdTime   = 0;
 unsigned long lastUpDownCmdTime = 0;
-const unsigned long holdTimeout = 150;  // ms sem novo comando para parar
+const unsigned long holdTimeout = 250;  // ms sem novo comando para parar
 
 // ================= TELEMETRIA / BUFFER RX =================
 unsigned long lastTelemetryTime = 0;
@@ -763,6 +763,25 @@ void setup() {
     Serial.println(F("[1] GPS Serial..."));
   #endif
   Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  delay(500);
+  // UBX-CFG-RATE: 250ms = 4Hz
+  static const uint8_t ubxRate4Hz[] = {
+    0xB5,0x62, 0x06,0x08, 0x06,0x00, 0xFA,0x00, 0x01,0x00, 0x01,0x00, 0x10,0x96
+  };
+  Serial2.write(ubxRate4Hz, sizeof(ubxRate4Hz));
+  // UBX-CFG-CFG: salva na flash do GPS (persiste apos desligar)
+  static const uint8_t ubxSave[] = {
+    0xB5,0x62, 0x06,0x09, 0x0D,0x00,
+    0x00,0x00,0x00,0x00,  // clearMask
+    0xFF,0xFF,0x00,0x00,  // saveMask
+    0x00,0x00,0x00,0x00,  // loadMask
+    0x17,                  // deviceMask
+    0x31,0xBF              // checksum
+  };
+  Serial2.write(ubxSave, sizeof(ubxSave));
+  #ifdef LOG_ENABLE
+    Serial.println(F("  GPS : rate 4Hz configurado"));
+  #endif
 
   // --- Wire / I2C ---
   #ifdef LOG_ENABLE
@@ -812,12 +831,12 @@ void setup() {
         Serial.println(F("             Verifique fiacao SPI / alimentacao 3.3V"));
       #endif
     } else {
-      //radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
+     // radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
       radio.setDataRate(RF24_250KBPS);
-      //radio.setPALevel(RF24_PA_MAX);
-     // radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
+      radio.setPALevel(RF24_PA_MAX);
+      radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
       // Pipe 0 é reservado para TX/ACK — usar pipe 1 para recepção
-      radio.openReadingPipe(0, address);
+      radio.openReadingPipe(1, address);
       radio.startListening();
       carregarControlesNVS();
       bootTime = millis();
@@ -955,7 +974,7 @@ void loop() {
       Serial.print(controlID);
       Serial.print(F(" bytes=["));
       for (int _i = 0; _i < 18; _i++) {
-        Serial.print((uint8_t)text[_i]);
+        Serial.print(text[_i]);
         if (_i < 17) Serial.print(',');
       }
       Serial.print(F("] autorizado="));
@@ -986,7 +1005,7 @@ void loop() {
 
     char *cmd = &text[0];
     #ifdef USE_BUZZER
-    //  beep(0);
+     //beep(1);
     #endif
 
     if (cmd[7]=='1' && !northMode) {
