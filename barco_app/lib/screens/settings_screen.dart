@@ -42,7 +42,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
+  bool _verificarBLE() {
+    if (widget.ble.isConnected) return true;
+    if (!mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text('Sem conexão com o motor.',
+          style: TextStyle(color: Colors.white)),
+      backgroundColor: Colors.red.withValues(alpha: 0.85),
+      duration: const Duration(seconds: 3),
+    ));
+    return false;
+  }
+
   Future<void> _toggleApontarNorte() async {
+    if (!_verificarBLE()) return;
     if (_apontandoNorte) {
       await widget.ble.sendPararNorte();
       setState(() => _apontandoNorte = false);
@@ -53,14 +66,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _incrementPwm() async {
+    if (!_verificarBLE()) return;
     await widget.ble.sendPwmHelMinPlus();
   }
 
   Future<void> _decrementPwm() async {
+    if (!_verificarBLE()) return;
     await widget.ble.sendPwmHelMinMinus();
   }
 
   Future<void> _calibrate() async {
+    if (!_verificarBLE()) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

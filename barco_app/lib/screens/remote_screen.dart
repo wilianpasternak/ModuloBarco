@@ -21,9 +21,23 @@ class RemoteScreen extends StatefulWidget {
 class _RemoteScreenState extends State<RemoteScreen> {
   Timer? _acelTimer;
   Timer? _giroTimer;
+  Timer? _upDownTimer;
+
+  bool _verificarBLE() {
+    if (widget.ble.isConnected) return true;
+    if (!mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text('Sem conexão com o motor.',
+          style: TextStyle(color: Colors.white)),
+      backgroundColor: Colors.red.withValues(alpha: 0.85),
+      duration: const Duration(seconds: 3),
+    ));
+    return false;
+  }
 
   // ── Acelerador hold ──────────────────────────────────────────────
   void _startAcel(bool plus) {
+    if (!_verificarBLE()) return;
     _sendAcelOnce(plus);
     _acelTimer = Timer.periodic(const Duration(milliseconds: 120), (_) => _sendAcelOnce(plus));
   }
@@ -44,6 +58,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
   Future<void> Function()? _giroStop;
 
   void _startGiro(bool right) {
+    if (!_verificarBLE()) return;
     _giroTimer?.cancel();
     final send = right ? widget.ble.sendGiroDirStart : widget.ble.sendGiroEsqStart;
     _giroStop = right ? widget.ble.sendGiroDirStop : widget.ble.sendGiroEsqStop;
@@ -58,7 +73,44 @@ class _RemoteScreenState extends State<RemoteScreen> {
     _giroStop = null;
   }
 
+  Future<void> _toggleMotor() async {
+    if (!_verificarBLE()) return;
+    await widget.ble.sendToggleMotor();
+  }
+
+  Future<void> _toggleNorth() async {
+    if (!_verificarBLE()) return;
+    await widget.ble.sendToggleNorth();
+  }
+
+  Future<void> _startUpChecked() async {
+    if (!_verificarBLE()) return;
+    _upDownTimer?.cancel();
+    widget.ble.sendUpStart();
+    _upDownTimer = Timer.periodic(const Duration(milliseconds: 100), (_) => widget.ble.sendUpStart());
+  }
+
+  Future<void> _stopUp() async {
+    _upDownTimer?.cancel();
+    _upDownTimer = null;
+    await widget.ble.sendUpStop();
+  }
+
+  Future<void> _startDownChecked() async {
+    if (!_verificarBLE()) return;
+    _upDownTimer?.cancel();
+    widget.ble.sendDownStart();
+    _upDownTimer = Timer.periodic(const Duration(milliseconds: 100), (_) => widget.ble.sendDownStart());
+  }
+
+  Future<void> _stopDown() async {
+    _upDownTimer?.cancel();
+    _upDownTimer = null;
+    await widget.ble.sendDownStop();
+  }
+
   Future<void> _toggleAnchor() async {
+    if (!_verificarBLE()) return;
     final tel = widget.tel;
     final jaAtiva = tel?.anchorActive ?? false;
     // Se tentando ATIVAR e GPS sem fix → bloqueia com alerta
@@ -95,6 +147,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
   void dispose() {
     _acelTimer?.cancel();
     _giroTimer?.cancel();
+    _upDownTimer?.cancel();
     _giroStop = null;
     super.dispose();
   }
@@ -140,7 +193,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
                     ),
                     _MotorCircleBtn(
                       active: motorActive,
-                      onTap: widget.ble.sendToggleMotor,
+                      onTap: _toggleMotor,
                     ),
                     _ArrowHoldBtn(
                       icon: Icons.arrow_forward_ios_rounded,
@@ -185,7 +238,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
                       icon: Icons.gps_fixed,
                       label: 'NORTE',
                       active: northActive,
-                      onTap: widget.ble.sendToggleNorth,
+                      onTap: _toggleNorth,
                       size: 58,
                       iconSize: 26,
                     ),
@@ -199,8 +252,8 @@ class _RemoteScreenState extends State<RemoteScreen> {
                     _CircleHoldBtn(
                       icon: Icons.keyboard_arrow_up_rounded,
                       label: 'SUBIR',
-                      onStart: widget.ble.sendUpStart,
-                      onStop:  widget.ble.sendUpStop,
+                      onStart: _startUpChecked,
+                      onStop:  _stopUp,
                       size: 58,
                       iconSize: 30,
                     ),
@@ -220,8 +273,8 @@ class _RemoteScreenState extends State<RemoteScreen> {
                     _CircleHoldBtn(
                       icon: Icons.keyboard_arrow_down_rounded,
                       label: 'DESCER',
-                      onStart: widget.ble.sendDownStart,
-                      onStop:  widget.ble.sendDownStop,
+                      onStart: _startDownChecked,
+                      onStop:  _stopDown,
                       size: 58,
                       iconSize: 30,
                     ),

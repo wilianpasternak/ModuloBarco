@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 //#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.40"
+#define FIRMWARE_VERSION "1.1.42"
 // Incremente GPS_CONFIG_VERSION para forcar reconfigurar o GPS no proximo boot
 #define GPS_CONFIG_VERSION 6
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
@@ -29,7 +29,7 @@
 const int left       = 2;    // PWM giro esquerda  (LEDC)
 const int right      = 4;    // PWM giro direita   (LEDC)
 const int acelerador = 33;   // PWM helice         (LEDC)
-const int pinUp      = 12;   // Subir (digital HIGH=ativo) ⚠️ strapping pin: sem pull-up externo
+const int pinUp      = 32;   // Subir (digital HIGH=ativo) ⚠️ strapping pin: sem pull-up externo
 const int pinDown    = 13;   // Descer (digital HIGH=ativo)
 #define GPS_RX_PIN   16
 #define GPS_TX_PIN   17

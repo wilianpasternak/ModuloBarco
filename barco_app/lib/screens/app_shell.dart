@@ -43,8 +43,21 @@ class _AppShellState extends State<AppShell> {
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
     if (widget.autoReconnect) {
-      Future.delayed(const Duration(milliseconds: 600), _reconnect);
+      _scheduleReconnect();
     }
+  }
+
+  Future<void> _scheduleReconnect() async {
+    try {
+      await FlutterBluePlus.adapterState
+          .where((s) => s == BluetoothAdapterState.on)
+          .first
+          .timeout(const Duration(seconds: 10));
+      await Future.delayed(const Duration(milliseconds: 300));
+    } catch (_) {
+      await Future.delayed(const Duration(milliseconds: 600));
+    }
+    if (mounted) _reconnect();
   }
 
   void _onConnectionChange(bool connected) {
@@ -59,9 +72,11 @@ class _AppShellState extends State<AppShell> {
       if (!connected) _tel = null;
     });
     if (!connected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Conexão com o motor perdida')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Conexão com o motor perdida',
+            style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.red.withValues(alpha: 0.85),
+      ));
     }
   }
 
@@ -94,12 +109,14 @@ class _AppShellState extends State<AppShell> {
     } catch (_) {
       if (mounted) {
         setState(() { _isReconnecting = false; _isConnected = false; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Motor não encontrado. Verifique se está ligado e toque em wifi para tentar novamente.'),
-            duration: Duration(seconds: 5),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text(
+            'Motor não encontrado. Verifique se está ligado e toque em wifi para tentar novamente.',
+            style: TextStyle(color: Colors.white),
           ),
-        );
+          backgroundColor: Colors.red.withValues(alpha: 0.85),
+          duration: const Duration(seconds: 5),
+        ));
       }
     }
   }
