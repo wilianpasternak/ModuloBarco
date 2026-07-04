@@ -941,7 +941,34 @@ void loop() {
   }
 
   // --- GPS ---
+  #ifdef LOG_ENABLE
+  {
+    static unsigned long _gpsLastUpdate = 0;
+    static unsigned long _gpsLastPrint  = 0;
+    static float         _gpsHz         = 0;
+    while (Serial2.available()) {
+      if (gps.encode(Serial2.read()) && gps.location.isUpdated()) {
+        unsigned long now = millis();
+        if (_gpsLastUpdate > 0) {
+          unsigned long interval = now - _gpsLastUpdate;
+          _gpsHz = (interval > 0) ? 1000.0f / interval : 0;
+        }
+        _gpsLastUpdate = now;
+      }
+    }
+    if (millis() - _gpsLastPrint > 3000) {
+      _gpsLastPrint = millis();
+      Serial.print(F("[GPS] rate="));
+      Serial.print(_gpsHz, 2);
+      Serial.print(F("Hz  sentences="));
+      Serial.print(gps.sentencesWithFix());
+      Serial.print(F("  chars="));
+      Serial.println(gps.charsProcessed());
+    }
+  }
+  #else
   while (Serial2.available()) gps.encode(Serial2.read());
+  #endif
 
   // ========================================================
   //              ENTRADA DE COMANDOS
