@@ -112,16 +112,20 @@ jobs:
           APK="artifacts/BragaPesca-${VERSION}.apk"
           IPA="artifacts/BragaPesca-${VERSION}.ipa"
 
+          {
+            echo "## App Braga Pesca v${VERSION}"
+            echo ""
+            echo "### Android"
+            echo "Baixe o arquivo **BragaPesca-${VERSION}.apk** e instale diretamente no dispositivo."
+            echo "> Habilite \"Fontes desconhecidas\" em Configurações → Segurança se necessário."
+            echo ""
+            echo "### iOS"
+            echo "O arquivo **BragaPesca-${VERSION}.ipa** é não-assinado — instalação via **AltStore** ou **Sideloadly**."
+            echo "> Não disponível na App Store. Requer re-sign anual se usar conta Apple gratuita."
+          } > notes.md
+
           gh release create "${{ github.ref_name }}" \
             "$APK" \
             "$IPA" \
             --title "App Braga Pesca v${VERSION}" \
-            --notes "## App Braga Pesca v${VERSION}
-
-### Android
-Baixe o arquivo **BragaPesca-${VERSION}.apk** e instale diretamente no dispositivo.
-> Habilite \"Fontes desconhecidas\" em Configurações → Segurança se necessário.
-
-### iOS
-O arquivo **BragaPesca-${VERSION}.ipa** é não-assinado — instalação via **AltStore** ou **Sideloadly**.
-> Não disponível na App Store. Requer re-sign anual se usar conta Apple gratuita."
+            --notes-file notes.md
