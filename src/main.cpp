@@ -1,9 +1,9 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 //#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.42"
+#define FIRMWARE_VERSION "1.1.44"
 // Incremente GPS_CONFIG_VERSION para forcar reconfigurar o GPS no proximo boot
-#define GPS_CONFIG_VERSION 6
+#define GPS_CONFIG_VERSION 7
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -29,8 +29,8 @@
 const int left       = 2;    // PWM giro esquerda  (LEDC)
 const int right      = 4;    // PWM giro direita   (LEDC)
 const int acelerador = 33;   // PWM helice         (LEDC)
-const int pinUp      = 32;   // Subir (digital HIGH=ativo) ⚠️ strapping pin: sem pull-up externo
-const int pinDown    = 13;   // Descer (digital HIGH=ativo)
+const int pinUp      = 32;   // Subir  (relé: LOW=ativo, HIGH=desligado)
+const int pinDown    = 13;   // Descer (relé: LOW=ativo, HIGH=desligado)
 #define GPS_RX_PIN   16
 #define GPS_TX_PIN   17
 #define I2C_SDA_PIN  21
@@ -382,7 +382,7 @@ void pararGiro() {
 
 void pararUpDown() {
   upAtivo = false; downAtivo = false;
-  digitalWrite(pinUp, LOW); digitalWrite(pinDown, LOW);
+  digitalWrite(pinUp, HIGH); digitalWrite(pinDown, HIGH);
 }
 
 // ================= HELPER BLE SEND =================
@@ -578,22 +578,22 @@ void processBlecmd(const String& cmd) {
   // --- Subir ---
   else if (cmd == "$UPP+") {
     upAtivo = true; downAtivo = false;
-    digitalWrite(pinUp, HIGH); digitalWrite(pinDown, LOW);
+    digitalWrite(pinUp, LOW); digitalWrite(pinDown, HIGH);
     lastUpDownCmdTime = millis();
   }
   else if (cmd == "$UPP-") {
     upAtivo = false;
-    if (!downAtivo) digitalWrite(pinUp, LOW);
+    if (!downAtivo) digitalWrite(pinUp, HIGH);
   }
   // --- Descer ---
   else if (cmd == "$DWN+") {
     downAtivo = true; upAtivo = false;
-    digitalWrite(pinDown, HIGH); digitalWrite(pinUp, LOW);
+    digitalWrite(pinDown, LOW); digitalWrite(pinUp, HIGH);
     lastUpDownCmdTime = millis();
   }
   else if (cmd == "$DWN-") {
     downAtivo = false;
-    if (!upAtivo) digitalWrite(pinDown, LOW);
+    if (!upAtivo) digitalWrite(pinDown, HIGH);
   }
   // --- PWM Helice Minimo ---
   else if (cmd == "$HMN+") {
@@ -849,8 +849,8 @@ void setup() {
   pinMode(acelerador, OUTPUT);
   pinMode(pinUp,      OUTPUT);
   pinMode(pinDown,    OUTPUT);
-  digitalWrite(pinUp,   LOW);
-  digitalWrite(pinDown, LOW);
+  digitalWrite(pinUp,   HIGH);
+  digitalWrite(pinDown, HIGH);
   #ifdef USE_BUZZER
     pinMode(buz, OUTPUT);
   #endif
@@ -1132,15 +1132,15 @@ void loop() {
       if (cmd[1]=='1'){ motorWrite(left,230); motorWrite(right,0); tempoLigadoGiro=millis(); }
       else if (cmd[2]=='1'){ motorWrite(right,230); motorWrite(left,0); tempoLigadoGiro=millis(); }
       else if (!giroDir && !giroEsq && !calibrando){ motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis(); }
-      if (cmd[5]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
-      else if (cmd[6]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
-      else if (!upAtivo && !downAtivo){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
+      if (cmd[5]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
+      else if (cmd[6]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
+      else if (!upAtivo && !downAtivo){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
     }
   }
 
   // Timeouts hold NRF — só agem se BLE nao estiver controlando o mesmo atuador
   if (!anchorMode && !northMode && !upAtivo && !downAtivo && (millis()-tempoLigadoUpDown) > 150) {
-    digitalWrite(pinUp,LOW); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis();
+    digitalWrite(pinUp,HIGH); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis();
   }
   if (!anchorMode && !northMode && !giroDir && !giroEsq && (millis()-tempoLigadoGiro) > 150) {
     motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis();
