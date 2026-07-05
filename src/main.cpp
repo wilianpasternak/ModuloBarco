@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
-//#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.45"
+#define LOG_ENABLE    // Habilita debug via Serial
+#define FIRMWARE_VERSION "1.1.47"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -63,6 +63,7 @@ inline void motorWrite(int pin, int val) {
   const byte address[6] = "00001";
   #define MAX_CONTROLES 5
   uint32_t controlesMem[MAX_CONTROLES];
+  int8_t   remoteBatt[MAX_CONTROLES] = {-1,-1,-1,-1,-1};
   unsigned long bootTime;
   bool modoCadastro = true;
   const unsigned long cadastroTimeout = 1500;
@@ -120,8 +121,9 @@ float heading           = 0;
 long  lastCompassReaded = 0;
 long  updateGiro        = 0;
 #ifdef USE_BUZZER
-  long buzzerLast  = 10;
-  bool buzzerAtivo = false;
+  long buzzerLast    = 10;
+  bool buzzerAtivo   = false;
+  bool buzzerEnabled = true;
 #endif
 const double headingDeadzone = 8.0;
 float northHeadingTarget     = 0;
@@ -215,8 +217,10 @@ void salvarControle(uint8_t slot, uint32_t id) {
   prefs.putUInt(key.c_str(), id);
   prefs.end();
   #ifdef USE_BUZZER
-    for (int i = 0; i <= slot; i++) {
-      digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); delay(200);
+    if (buzzerEnabled) {
+      for (int i = 0; i <= slot; i++) {
+        digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); delay(200);
+      }
     }
   #endif
 }
@@ -263,7 +267,7 @@ void calibrarBussola() {
   #endif
   float minX = 9999, maxX = -9999, minY = 9999, maxY = -9999;
   #ifdef USE_BUZZER
-    digitalWrite(buz, HIGH);
+    if (buzzerEnabled) digitalWrite(buz, HIGH);
   #endif
   long t0 = millis();
   motorWrite(left, 140); motorWrite(right, 0);
@@ -280,8 +284,7 @@ void calibrarBussola() {
   }
   motorWrite(left, 0); motorWrite(right, 0);
   #ifdef USE_BUZZER
-    digitalWrite(buz, LOW); delay(1000);
-    digitalWrite(buz, HIGH);
+    if (buzzerEnabled) { digitalWrite(buz, LOW); delay(1000); digitalWrite(buz, HIGH); }
   #endif
   t0 = millis();
   motorWrite(left, 0); motorWrite(right, 140);
@@ -298,9 +301,11 @@ void calibrarBussola() {
   }
   motorWrite(left, 0); motorWrite(right, 0);
   #ifdef USE_BUZZER
-    digitalWrite(buz, LOW); delay(1000);
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
+    if (buzzerEnabled) {
+      digitalWrite(buz, LOW); delay(1000);
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
+      }
     }
   #endif
   compassXOffset = (maxX + minX) / 2.0f;
@@ -351,6 +356,7 @@ double getBearing(double lat1, double lon1, double lat2, double lon2) {
 // ================= BUZZER =================
 #ifdef USE_BUZZER
 void beep(int) {
+  if (!buzzerEnabled) return;
   digitalWrite(buz, HIGH);
   buzzerLast  = millis();
   buzzerAtivo = true;
@@ -426,10 +432,12 @@ void ativarAncora() {
       Serial.println(F("=====================================\n"));
     #endif
     #ifdef USE_BUZZER
-      digitalWrite(buz, HIGH); delay(300);
-      digitalWrite(buz, LOW);  delay(100);
-      digitalWrite(buz, HIGH); delay(300);
-      digitalWrite(buz, LOW);
+      if (buzzerEnabled) {
+        digitalWrite(buz, HIGH); delay(300);
+        digitalWrite(buz, LOW);  delay(100);
+        digitalWrite(buz, HIGH); delay(300);
+        digitalWrite(buz, LOW);
+      }
     #endif
   } else {
     #ifdef LOG_ENABLE
@@ -438,8 +446,10 @@ void ativarAncora() {
       Serial.print(F("  age    : ")); Serial.print(gps.location.age()); Serial.println(F(" ms"));
     #endif
     #ifdef USE_BUZZER
-      for (int i = 0; i < 3; i++) {
-        digitalWrite(buz, HIGH); delay(80); digitalWrite(buz, LOW); delay(80);
+      if (buzzerEnabled) {
+        for (int i = 0; i < 3; i++) {
+          digitalWrite(buz, HIGH); delay(80); digitalWrite(buz, LOW); delay(80);
+        }
       }
     #endif
   }
@@ -470,9 +480,29 @@ void desativarAncora() {
   motorWrite(left,  0);
   motorWrite(right, 0);
   #ifdef USE_BUZZER
-    digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW);
+    if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW); }
   #endif
 }
+
+// ================= REM: helper =================
+#ifdef USE_NRF
+String buildRemMsg() {
+  String msg = "$REM:";
+  for (int i = 0; i < MAX_CONTROLES; i++) {
+    if (i > 0) msg += ",";
+    if (controlesMem[i] != 0) {
+      char idBuf[6];
+      sprintf(idBuf, "%05u", (unsigned)controlesMem[i]);
+      msg += String(idBuf) + ":";
+      msg += (remoteBatt[i] >= 0) ? String(remoteBatt[i]) : "-1";
+    } else {
+      msg += "00000:-1";
+    }
+  }
+  msg += "\n";
+  return msg;
+}
+#endif
 
 // ================= PROCESSAMENTO DE COMANDOS BLE =================
 void processBlecmd(const String& cmd) {
@@ -488,13 +518,13 @@ void processBlecmd(const String& cmd) {
       northHeadingTarget = heading;
       giroIntegral = 0; lastGiroError = 0; lastGiroTime = millis();
       #ifdef USE_BUZZER
-        digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW);
+        if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); }
       #endif
     } else {
       giroIntegral = 0; lastGiroError = 0; headIntegral = 0; lastHeadError = 0;
       if (motorLigado) motorWrite(acelerador, 0);
       #ifdef USE_BUZZER
-        digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW);
+        if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW); }
       #endif
     }
   }
@@ -622,7 +652,30 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$CFG?") {
     bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
     bleSend("$VER:" + String(FIRMWARE_VERSION) + "\n");
+    #ifdef USE_BUZZER
+      bleSend("$BUZ:" + String(buzzerEnabled ? 1 : 0) + "\n");
+    #endif
+    #ifdef USE_NRF
+      bleSend(buildRemMsg());
+    #endif
   }
+  // --- Buzzer ---
+  #ifdef USE_BUZZER
+  else if (cmd == "$BUZ1") {
+    buzzerEnabled = true;
+    prefs.begin("barco", false);
+    prefs.putBool("buzzerOn", true);
+    prefs.end();
+    bleSend("$BUZ:1\n");
+  }
+  else if (cmd == "$BUZ0") {
+    buzzerEnabled = false;
+    prefs.begin("barco", false);
+    prefs.putBool("buzzerOn", false);
+    prefs.end();
+    bleSend("$BUZ:0\n");
+  }
+  #endif
   // --- Aponta Norte: gira para 0° com PWM 120 e histerese 5° (calibracao bussola) ---
   else if (cmd == "$APN") {
     apontaNorteMode = true;
@@ -761,6 +814,9 @@ void setup() {
   prefs.begin("barco", true);
   pwmHeliceMin = prefs.getInt("pwmHelMin",   0);
   pwmMotorOff  = prefs.getInt("pwmMotorOff", 0);
+  #ifdef USE_BUZZER
+    buzzerEnabled = prefs.getBool("buzzerOn", true);
+  #endif
   prefs.end();
   #ifdef LOG_ENABLE
     Serial.print(F("  pwmHeliceMin : ")); Serial.print(pwmHeliceMin);
@@ -1037,6 +1093,9 @@ void loop() {
     char idStr[6];
     memcpy(idStr, &text[12], 5); idStr[5] = '\0';
     uint32_t controlID = (uint32_t)atoi(idStr);
+    char batStr[4];
+    memcpy(batStr, &text[9], 3); batStr[3] = '\0';
+    int8_t batPerc = (int8_t)atoi(batStr);
 
     #ifdef LOG_ENABLE
     {
@@ -1068,9 +1127,22 @@ void loop() {
 
     if (!controleAutorizado(controlID)) {
       #ifdef USE_BUZZER
-        for (int i=0;i<6;i++){ digitalWrite(buz,HIGH); delay(30); digitalWrite(buz,LOW); delay(30); }
+        if (buzzerEnabled) {
+          for (int i=0;i<6;i++){ digitalWrite(buz,HIGH); delay(30); digitalWrite(buz,LOW); delay(30); }
+        }
       #endif
       return;
+    }
+
+    // Atualiza bateria do controle e notifica app se mudou
+    for (int _s = 0; _s < MAX_CONTROLES; _s++) {
+      if (controlesMem[_s] == controlID) {
+        if (remoteBatt[_s] != batPerc) {
+          remoteBatt[_s] = batPerc;
+          if (bleConnected) bleSend(buildRemMsg());
+        }
+        break;
+      }
     }
 
     char *cmd = &text[0];
@@ -1087,13 +1159,13 @@ void loop() {
       if (northMode) {
         northHeadingTarget=heading; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
         #ifdef USE_BUZZER
-          digitalWrite(buz,HIGH); delay(300); digitalWrite(buz,LOW);
+          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(300); digitalWrite(buz,LOW); }
         #endif
       } else {
         giroIntegral=0; lastGiroError=0; headIntegral=0; lastHeadError=0;
         if (motorLigado) motorWrite(acelerador,0);
         #ifdef USE_BUZZER
-          digitalWrite(buz,HIGH); delay(700); digitalWrite(buz,LOW);
+          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(700); digitalWrite(buz,LOW); }
         #endif
       }
       delay(300); return;

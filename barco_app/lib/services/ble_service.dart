@@ -6,6 +6,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import '../models/telemetry.dart';
 
+class RemoteInfo {
+  final String code;
+  final int batt;
+  const RemoteInfo({required this.code, required this.batt});
+}
+
 const _serviceUuid        = '0000ffe0-0000-1000-8000-00805f9b34fb';
 const _characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
 const _otaCharUuid        = '0000ffe2-0000-1000-8000-00805f9b34fb';
@@ -24,12 +30,16 @@ class BleService {
   final _pwmHelMinController   = StreamController<int>.broadcast();
   final _versionController     = StreamController<String>.broadcast();
   final _otaProgressController = StreamController<double>.broadcast();
+  final _buzzerController      = StreamController<bool>.broadcast();
+  final _remotesController     = StreamController<List<RemoteInfo>>.broadcast();
 
-  Stream<Telemetry> get telemetryStream   => _telemetryController.stream;
-  Stream<bool>      get connectionStream  => _connectionController.stream;
-  Stream<int>       get pwmHelMinStream   => _pwmHelMinController.stream;
-  Stream<String>    get versionStream     => _versionController.stream;
-  Stream<double>    get otaProgressStream => _otaProgressController.stream;
+  Stream<Telemetry>        get telemetryStream   => _telemetryController.stream;
+  Stream<bool>             get connectionStream  => _connectionController.stream;
+  Stream<int>              get pwmHelMinStream   => _pwmHelMinController.stream;
+  Stream<String>           get versionStream     => _versionController.stream;
+  Stream<double>           get otaProgressStream => _otaProgressController.stream;
+  Stream<bool>             get buzzerStream      => _buzzerController.stream;
+  Stream<List<RemoteInfo>> get remotesStream     => _remotesController.stream;
   String get firmwareVersion => _firmwareVersion;
 
   bool get isConnected => _device != null && (_device!.isConnected);
@@ -108,6 +118,20 @@ class BleService {
       } else if (line.startsWith('\$VER:')) {
         _firmwareVersion = line.substring(5);
         _versionController.add(_firmwareVersion);
+      } else if (line.startsWith('\$BUZ:')) {
+        final val = int.tryParse(line.substring(5));
+        if (val != null) _buzzerController.add(val == 1);
+      } else if (line.startsWith('\$REM:')) {
+        final remotes = <RemoteInfo>[];
+        final parts = line.substring(5).split(',');
+        for (final p in parts) {
+          final idx = p.indexOf(':');
+          if (idx < 0) continue;
+          final code = p.substring(0, idx);
+          final batt = int.tryParse(p.substring(idx + 1)) ?? -1;
+          if (code != '00000') remotes.add(RemoteInfo(code: code, batt: batt));
+        }
+        _remotesController.add(remotes);
       } else if (line.startsWith('\$')) {
         final t = Telemetry.fromLine(line);
         if (t != null) _telemetryController.add(t);
@@ -153,6 +177,10 @@ class BleService {
   // --- Configuracao pwmHeliceMin ---
   Future<void> sendPwmHelMinPlus()  => sendCommand('\$HMN+');
   Future<void> sendPwmHelMinMinus() => sendCommand('\$HMN-');
+
+  // --- Buzzer ---
+  Future<void> sendBuzzerOn()      => sendCommand('\$BUZ1');
+  Future<void> sendBuzzerOff()     => sendCommand('\$BUZ0');
 
   // --- Calibrar bussola ---
   Future<void> sendCalibrate()     => sendCommand('\$CAL');
@@ -263,5 +291,7 @@ class BleService {
     _pwmHelMinController.close();
     _versionController.close();
     _otaProgressController.close();
+    _buzzerController.close();
+    _remotesController.close();
   }
 }

@@ -21,6 +21,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _pwmHelMin = 0;
   StreamSubscription? _hmnSub;
   bool _apontandoNorte = false;
+  bool _buzzerEnabled = true;
+  StreamSubscription? _buzzerSub;
+  List<RemoteInfo> _remotes = [];
+  StreamSubscription? _remotesSub;
 
   // OTA state
   String? _latestVersion;
@@ -31,12 +35,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _pwmHelMin = widget.initialPwmHelMin;
-    _hmnSub = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
+    _hmnSub    = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
+    _buzzerSub = widget.ble.buzzerStream.listen((v) => setState(() => _buzzerEnabled = v));
+    _remotesSub = widget.ble.remotesStream.listen((v) => setState(() => _remotes = v));
   }
 
   @override
   void dispose() {
     _hmnSub?.cancel();
+    _buzzerSub?.cancel();
+    _remotesSub?.cancel();
     // Garante que o modo aponta-norte para ao sair da tela
     if (_apontandoNorte) widget.ble.sendPararNorte();
     super.dispose();
@@ -52,6 +60,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       duration: const Duration(seconds: 3),
     ));
     return false;
+  }
+
+  Future<void> _toggleBuzzer(bool value) async {
+    if (!_verificarBLE()) return;
+    if (value) {
+      await widget.ble.sendBuzzerOn();
+    } else {
+      await widget.ble.sendBuzzerOff();
+    }
   }
 
   Future<void> _toggleApontarNorte() async {
@@ -306,6 +323,116 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+
+          // ── Buzzer ──────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionTitle('Buzzer'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: _kPanel,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.volume_up_outlined, color: _kGoldDim, size: 22),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Buzzer do motor',
+                      style: TextStyle(color: Colors.white70, fontSize: 14)),
+                ),
+                Switch(
+                  value: _buzzerEnabled,
+                  activeThumbColor: _kDark,
+                  activeTrackColor: _kGold,
+                  inactiveThumbColor: Colors.grey,
+                  inactiveTrackColor: Colors.white12,
+                  onChanged: _toggleBuzzer,
+                ),
+              ],
+            ),
+          ),
+
+          // ── Controles Remotos ────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionTitle('Controles Remotos'),
+          const SizedBox(height: 12),
+          if (_remotes.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _kPanel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+              ),
+              child: const Center(
+                child: Text(
+                  'Nenhum controle ativo.\nEnvie um comando pelo controle para exibir a bateria.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ),
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: _kPanel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+              ),
+              child: Column(
+                children: _remotes.asMap().entries.map((e) {
+                  final i = e.key;
+                  final r = e.value;
+                  final pct = r.batt.clamp(0, 100) / 100.0;
+                  final battColor = r.batt >= 50
+                      ? Colors.green.shade400
+                      : r.batt >= 20
+                          ? Colors.orange.shade400
+                          : Colors.red.shade400;
+                  return Column(
+                    children: [
+                      if (i > 0) Divider(height: 1, color: _kGoldDim.withValues(alpha: 0.3)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.settings_remote, color: _kGoldDim, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text('Código ${r.code}',
+                                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                            ),
+                            if (r.batt < 0)
+                              const Text('–', style: TextStyle(color: Colors.white38, fontSize: 13))
+                            else ...[
+                              SizedBox(
+                                width: 80,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: LinearProgressIndicator(
+                                    value: pct,
+                                    minHeight: 8,
+                                    backgroundColor: Colors.white12,
+                                    valueColor: AlwaysStoppedAnimation<Color>(battColor),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text('${r.batt}%',
+                                  style: TextStyle(color: battColor, fontSize: 13,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
 
           // ── Procurar novo motor ──────────────────────────────────
           const SizedBox(height: 24),
