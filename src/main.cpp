@@ -1,9 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 //#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.44"
-// Incremente GPS_CONFIG_VERSION para forcar reconfigurar o GPS no proximo boot
-#define GPS_CONFIG_VERSION 7
+#define FIRMWARE_VERSION "1.1.45"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -802,38 +800,26 @@ void setup() {
     0x31,0xBF                         // checksum (verificado)
   };
 
-  prefs.begin("barco", true);
-  uint8_t gpsCfgVer = prefs.getUChar("gpsCfgVer", 0);
-  prefs.end();
-
-  if (gpsCfgVer != GPS_CONFIG_VERSION) {
-    // Primeira vez (ou nova versao de config): configura baud + rate
-    Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    delay(500);
-    Serial2.write(ubxCfgPrt38400, sizeof(ubxCfgPrt38400));
-    Serial2.flush();
-    delay(200);                       // GPS precisa trocar baud antes do proximo comando
-    Serial2.end();
-    Serial2.begin(38400, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    delay(100);
-    Serial2.write(ubxRate5Hz, sizeof(ubxRate5Hz));
-    delay(100);
-    Serial2.write(ubxSave, sizeof(ubxSave));
-    delay(300);                       // GPS precisa gravar na flash interna
-    prefs.begin("barco", false);
-    prefs.putUChar("gpsCfgVer", GPS_CONFIG_VERSION);
-    prefs.end();
-    #ifdef LOG_ENABLE
-      Serial.println(F("  GPS: configurado 38400 baud / 5Hz e salvo na flash"));
-    #endif
-  } else {
-    // GPS ja configurado: sobe direto em 38400
-    Serial2.begin(38400, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    delay(100);
-    #ifdef LOG_ENABLE
-      Serial.println(F("  GPS: ja configurado (38400 / 5Hz)"));
-    #endif
-  }
+  // Sempre reconfigura a partir de 9600 em todo boot.
+  // Se o GPS ja estiver em 38400 (BBR/EEPROM intacto), o CFG-PRT em 9600
+  // chega como lixo (baud errado) e e ignorado — GPS permanece em 38400.
+  // Se o GPS voltou ao padrao de fabrica (9600), recebe o CFG-PRT corretamente
+  // e muda para 38400. Em ambos os casos o Serial2 e reaberto em 38400 a seguir.
+  Serial2.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  delay(500);
+  Serial2.write(ubxCfgPrt38400, sizeof(ubxCfgPrt38400));
+  Serial2.flush();
+  delay(200);
+  Serial2.end();
+  Serial2.begin(38400, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+  delay(100);
+  Serial2.write(ubxRate5Hz, sizeof(ubxRate5Hz));
+  delay(100);
+  Serial2.write(ubxSave, sizeof(ubxSave));
+  delay(600);                         // Aguarda gravacao na EEPROM/BBR do modulo
+  #ifdef LOG_ENABLE
+    Serial.println(F("  GPS: configurado 38400 / 5Hz"));
+  #endif
 
   // --- Wire / I2C ---
   #ifdef LOG_ENABLE
