@@ -355,7 +355,7 @@ class _MapScreenState extends State<MapScreen> {
       width: 48,
       height: 48,
       child: Transform.rotate(
-        angle: ((tel?.heading ?? 0) + 45) * math.pi / 180,
+        angle: (tel?.heading ?? 0) * math.pi / 180,
         child: Image.asset('assets/boat_icon.png', fit: BoxFit.contain),
       ),
     ));
