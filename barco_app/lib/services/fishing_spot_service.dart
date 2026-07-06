@@ -25,6 +25,14 @@ class FishingSpotService {
     return spots;
   }
 
+  Future<List<FishingSpot>> update(FishingSpot updated) async {
+    final spots = await load();
+    final idx = spots.indexWhere((s) => s.id == updated.id);
+    if (idx >= 0) spots[idx] = updated;
+    await _persist(spots);
+    return spots;
+  }
+
   Future<List<FishingSpot>> delete(String id) async {
     final spots = await load();
     spots.removeWhere((s) => s.id == id);

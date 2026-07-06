@@ -252,22 +252,39 @@ class _MapScreenState extends State<MapScreen> {
                 label: 'Coordenadas',
                 value: '${spot.lat.toStringAsFixed(5)}, ${spot.lng.toStringAsFixed(5)}'),
             const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade400,
-                  side: BorderSide(color: Colors.red.shade400),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _kGold,
+                    side: const BorderSide(color: _kGold),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Editar'),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _editSpot(spot);
+                  },
                 ),
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Excluir ponto'),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _deleteSpot(spot);
-                },
               ),
-            ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade400,
+                    side: BorderSide(color: Colors.red.shade400),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Excluir'),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _deleteSpot(spot);
+                  },
+                ),
+              ),
+            ]),
           ],
         ),
       ),
@@ -303,6 +320,22 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  Future<void> _editSpot(FishingSpot spot) async {
+    final result = await showModalBottomSheet<FishingSpot?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _kPanel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _EditSpotSheet(spot: spot),
+    );
+    if (result != null) {
+      final spots = await _spotService.update(result);
+      if (mounted) setState(() => _spots = spots);
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   String _fmtDate(DateTime dt) {
@@ -323,7 +356,7 @@ class _MapScreenState extends State<MapScreen> {
       height: 48,
       child: Transform.rotate(
         angle: (tel?.heading ?? 0) * math.pi / 180,
-        child: Image.asset('assets/boat_icon.jpg', fit: BoxFit.contain),
+        child: Image.asset('assets/boat_icon.png', fit: BoxFit.contain),
       ),
     ));
 
@@ -540,6 +573,134 @@ class _AddSpotSheetState extends State<_AddSpotSheet> {
               ),
               icon: const Icon(Icons.save_outlined),
               label: const Text('Salvar Ponto',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              onPressed: _save,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Edit spot bottom sheet ────────────────────────────────────────────────────
+
+class _EditSpotSheet extends StatefulWidget {
+  final FishingSpot spot;
+  const _EditSpotSheet({required this.spot});
+
+  @override
+  State<_EditSpotSheet> createState() => _EditSpotSheetState();
+}
+
+class _EditSpotSheetState extends State<_EditSpotSheet> {
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _speciesCtrl;
+  late final TextEditingController _countCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _descCtrl    = TextEditingController(text: widget.spot.description);
+    _speciesCtrl = TextEditingController(text: widget.spot.fishSpecies);
+    _countCtrl   = TextEditingController(
+        text: widget.spot.fishCount > 0 ? '${widget.spot.fishCount}' : '');
+  }
+
+  @override
+  void dispose() {
+    _descCtrl.dispose();
+    _speciesCtrl.dispose();
+    _countCtrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final updated = FishingSpot(
+      id:          widget.spot.id,
+      lat:         widget.spot.lat,
+      lng:         widget.spot.lng,
+      dateTime:    widget.spot.dateTime,
+      description: _descCtrl.text.trim(),
+      fishCount:   int.tryParse(_countCtrl.text.trim()) ?? 0,
+      fishSpecies: _speciesCtrl.text.trim(),
+    );
+    Navigator.pop(context, updated);
+  }
+
+  InputDecoration _inputDec(String label) => InputDecoration(
+    labelText: label,
+    labelStyle: const TextStyle(color: Colors.white54),
+    filled: true,
+    fillColor: Colors.white.withValues(alpha: 0.05),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: _kGoldDim.withValues(alpha: 0.5)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: _kGold),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20, right: 20, top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const Center(
+            child: Text('Editar Ponto de Pesca',
+                style: TextStyle(color: _kGold, fontSize: 17,
+                    fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _descCtrl,
+            style: const TextStyle(color: Colors.white),
+            decoration: _inputDec('Descrição'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _speciesCtrl,
+            style: const TextStyle(color: Colors.white),
+            decoration: _inputDec('Espécie'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _countCtrl,
+            style: const TextStyle(color: Colors.white),
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: _inputDec('Quantidade de peixes'),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kGold,
+                foregroundColor: _kDark,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Salvar Alterações',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
               onPressed: _save,
             ),

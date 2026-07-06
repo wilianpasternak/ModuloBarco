@@ -57,7 +57,7 @@ flutter:
 
   assets:
     - assets/logo_braga_pesca.png
-    - assets/boat_icon.jpg
+    - assets/boat_icon.png
     - assets/fish_point.png
 
   # To add assets to your application, add an assets section, like this:
