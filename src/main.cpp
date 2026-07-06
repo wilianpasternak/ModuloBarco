@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.47"
+#define FIRMWARE_VERSION "1.1.48"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -1128,7 +1128,7 @@ void loop() {
     if (!controleAutorizado(controlID)) {
       #ifdef USE_BUZZER
         if (buzzerEnabled) {
-          for (int i=0;i<6;i++){ digitalWrite(buz,HIGH); delay(30); digitalWrite(buz,LOW); delay(30); }
+          for (int i=0;i<3;i++){ digitalWrite(buz,HIGH); delay(50); digitalWrite(buz,LOW); delay(50); }
         }
       #endif
       return;
@@ -1147,7 +1147,7 @@ void loop() {
 
     char *cmd = &text[0];
     #ifdef USE_BUZZER
-     //beep(1);
+      if (buzzerEnabled) beep(1);  // 10ms — confirmacao de recebimento
     #endif
 
     if (cmd[7]=='1' && !northMode) {
