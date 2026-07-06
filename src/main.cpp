@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.48"
+#define FIRMWARE_VERSION "1.1.49"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -121,9 +121,10 @@ float heading           = 0;
 long  lastCompassReaded = 0;
 long  updateGiro        = 0;
 #ifdef USE_BUZZER
-  long buzzerLast    = 10;
-  bool buzzerAtivo   = false;
-  bool buzzerEnabled = true;
+  long buzzerLast     = 10;
+  int  buzzerDuration = 10;
+  bool buzzerAtivo    = false;
+  bool buzzerEnabled  = true;
 #endif
 const double headingDeadzone = 8.0;
 float northHeadingTarget     = 0;
@@ -355,8 +356,9 @@ double getBearing(double lat1, double lon1, double lat2, double lon2) {
 
 // ================= BUZZER =================
 #ifdef USE_BUZZER
-void beep(int) {
+void beep(int durationMs = 10) {
   if (!buzzerEnabled) return;
+  buzzerDuration = durationMs;
   digitalWrite(buz, HIGH);
   buzzerLast  = millis();
   buzzerAtivo = true;
@@ -506,6 +508,9 @@ String buildRemMsg() {
 
 // ================= PROCESSAMENTO DE COMANDOS BLE =================
 void processBlecmd(const String& cmd) {
+  #ifdef USE_BUZZER
+    if (cmd != "$CFG?") beep(10);
+  #endif
   // --- Ancora ---
   if (cmd == "$ANC") {
     if (!anchorMode) ativarAncora(); else desativarAncora();
@@ -667,6 +672,7 @@ void processBlecmd(const String& cmd) {
     prefs.putBool("buzzerOn", true);
     prefs.end();
     bleSend("$BUZ:1\n");
+    beep(50);  // sobrescreve o beep(10) do início com 50ms de confirmação
   }
   else if (cmd == "$BUZ0") {
     buzzerEnabled = false;
@@ -1021,7 +1027,7 @@ void loop() {
 
   // --- Buzzer one-shot ---
   #ifdef USE_BUZZER
-    if (buzzerAtivo && (millis() - buzzerLast) > 10) {
+    if (buzzerAtivo && (millis() - buzzerLast) >= (unsigned long)buzzerDuration) {
       digitalWrite(buz, LOW);
       buzzerAtivo = false;
     }
