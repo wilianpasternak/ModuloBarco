@@ -187,16 +187,8 @@ class _MapScreenState extends State<MapScreen> {
                       itemBuilder: (_, i) {
                         final s = _spots[i];
                         return ListTile(
-                          leading: Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.teal.shade800,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Center(
-                              child: Text('🐟', style: TextStyle(fontSize: 20)),
-                            ),
-                          ),
+                          leading: Image.asset('assets/fish_point.png',
+                              width: 40, height: 40, fit: BoxFit.contain),
                           title: Text(
                             s.description.isNotEmpty ? s.description : 'Sem descrição',
                             style: const TextStyle(color: Colors.white70, fontSize: 13),
@@ -240,7 +232,7 @@ class _MapScreenState extends State<MapScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              const Text('🐟', style: TextStyle(fontSize: 28)),
+              Image.asset('assets/fish_point.png', width: 36, height: 36, fit: BoxFit.contain),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -327,25 +319,11 @@ class _MapScreenState extends State<MapScreen> {
     // Barco
     markers.add(Marker(
       point: pos,
-      width: 44,
-      height: 44,
+      width: 48,
+      height: 48,
       child: Transform.rotate(
         angle: (tel?.heading ?? 0) * math.pi / 180,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.blue.shade700,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.directions_boat, color: Colors.white, size: 24),
-        ),
+        child: Image.asset('assets/boat_icon.jpg', fit: BoxFit.contain),
       ),
     ));
 
@@ -363,28 +341,12 @@ class _MapScreenState extends State<MapScreen> {
     for (final spot in _spots) {
       markers.add(Marker(
         point: LatLng(spot.lat, spot.lng),
-        width: 44,
-        height: 44,
+        width: 48,
+        height: 48,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => _showSpotDetail(spot),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.teal.shade700,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 3,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-            ),
-            child: const Center(
-              child: Text('🐟', style: TextStyle(fontSize: 22)),
-            ),
-          ),
+          child: Image.asset('assets/fish_point.png', fit: BoxFit.contain),
         ),
       ));
     }
