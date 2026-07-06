@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.51"
+#define FIRMWARE_VERSION "1.1.52"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -680,6 +680,25 @@ void processBlecmd(const String& cmd) {
     prefs.putBool("buzzerOn", false);
     prefs.end();
     bleSend("$BUZ:0\n");
+  }
+  #endif
+  // --- Remover controle NRF da NVS e runtime ---
+  #ifdef USE_NRF
+  else if (cmd.startsWith("$RMC:")) {
+    uint32_t id = (uint32_t)atoi(cmd.substring(5).c_str());
+    if (id != 0) {
+      for (int i = 0; i < MAX_CONTROLES; i++) {
+        if (controlesMem[i] == id) {
+          controlesMem[i] = 0;
+          remoteBatt[i]   = -1;
+          prefs.begin("barco", false);
+          prefs.putUInt(("ctrl" + String(i)).c_str(), 0);
+          prefs.end();
+          break;
+        }
+      }
+    }
+    bleSend(buildRemMsg());
   }
   #endif
   // --- Aponta Norte: gira para 0° com PWM 120 e histerese 5° (calibracao bussola) ---

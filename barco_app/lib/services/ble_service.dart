@@ -182,6 +182,9 @@ class BleService {
   Future<void> sendBuzzerOn()      => sendCommand('\$BUZ1');
   Future<void> sendBuzzerOff()     => sendCommand('\$BUZ0');
 
+  // --- Remover controle NRF (code = código de 5 dígitos) ---
+  Future<void> sendRemoveRemote(String code) => sendCommand('\$RMC:$code');
+
   // --- Calibrar bussola ---
   Future<void> sendCalibrate()     => sendCommand('\$CAL');
 

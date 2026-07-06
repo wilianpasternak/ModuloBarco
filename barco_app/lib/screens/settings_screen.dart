@@ -376,61 +376,120 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             )
           else
-            Container(
-              decoration: BoxDecoration(
-                color: _kPanel,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
-              ),
-              child: Column(
-                children: _remotes.asMap().entries.map((e) {
-                  final i = e.key;
-                  final r = e.value;
-                  final pct = r.batt.clamp(0, 100) / 100.0;
-                  final battColor = r.batt >= 50
-                      ? Colors.green.shade400
-                      : r.batt >= 20
-                          ? Colors.orange.shade400
-                          : Colors.red.shade400;
-                  return Column(
-                    children: [
-                      if (i > 0) Divider(height: 1, color: _kGoldDim.withValues(alpha: 0.3)),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.settings_remote, color: _kGoldDim, size: 20),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text('Código ${r.code}',
-                                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _kPanel,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+                ),
+                child: Column(
+                  children: _remotes.asMap().entries.map((e) {
+                    final i = e.key;
+                    final r = e.value;
+                    final pct = r.batt.clamp(0, 100) / 100.0;
+                    final battColor = r.batt >= 50
+                        ? Colors.green.shade400
+                        : r.batt >= 20
+                            ? Colors.orange.shade400
+                            : Colors.red.shade400;
+                    return Column(
+                      children: [
+                        if (i > 0) Divider(height: 1, color: _kGoldDim.withValues(alpha: 0.3)),
+                        Dismissible(
+                          key: ValueKey(r.code),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            color: Colors.red.shade700,
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Icon(Icons.delete_outline, color: Colors.white, size: 22),
+                                SizedBox(width: 6),
+                                Text('Excluir',
+                                    style: TextStyle(color: Colors.white,
+                                        fontWeight: FontWeight.bold, fontSize: 13)),
+                              ],
                             ),
-                            if (r.batt < 0)
-                              const Text('–', style: TextStyle(color: Colors.white38, fontSize: 13))
-                            else ...[
-                              SizedBox(
-                                width: 80,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: LinearProgressIndicator(
-                                    value: pct,
-                                    minHeight: 8,
-                                    backgroundColor: Colors.white12,
-                                    valueColor: AlwaysStoppedAnimation<Color>(battColor),
-                                  ),
+                          ),
+                          confirmDismiss: (direction) async {
+                            if (!_verificarBLE()) return false;
+                            return showDialog<bool>(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                backgroundColor: _kPanel,
+                                title: const Text('Excluir controle?',
+                                    style: TextStyle(color: _kGold)),
+                                content: Text(
+                                  'O controle de código ${r.code} será removido da memória do motor.\n\nEle não poderá mais enviar comandos até ser recadastrado.',
+                                  style: const TextStyle(color: Colors.white70),
                                 ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context, false),
+                                    child: const Text('Cancelar',
+                                        style: TextStyle(color: _kGoldDim)),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red.shade700),
+                                    onPressed: () => Navigator.pop(context, true),
+                                    child: const Text('Excluir',
+                                        style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 8),
-                              Text('${r.batt}%',
-                                  style: TextStyle(color: battColor, fontSize: 13,
-                                      fontWeight: FontWeight.bold)),
-                            ],
-                          ],
+                            );
+                          },
+                          onDismissed: (direction) {
+                            setState(() => _remotes =
+                                _remotes.where((x) => x.code != r.code).toList());
+                            widget.ble.sendRemoveRemote(r.code);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.settings_remote, color: _kGoldDim, size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text('Código ${r.code}',
+                                      style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                                ),
+                                if (r.batt < 0)
+                                  const Text('–',
+                                      style: TextStyle(color: Colors.white38, fontSize: 13))
+                                else ...[
+                                  SizedBox(
+                                    width: 80,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: LinearProgressIndicator(
+                                        value: pct,
+                                        minHeight: 8,
+                                        backgroundColor: Colors.white12,
+                                        valueColor: AlwaysStoppedAnimation<Color>(battColor),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text('${r.batt}%',
+                                      style: TextStyle(
+                                          color: battColor,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold)),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                }).toList(),
+                      ],
+                    );
+                  }).toList(),
+                ),
               ),
             ),
 
