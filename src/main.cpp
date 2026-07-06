@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.49"
+#define FIRMWARE_VERSION "1.1.51"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -122,7 +122,7 @@ long  lastCompassReaded = 0;
 long  updateGiro        = 0;
 #ifdef USE_BUZZER
   long buzzerLast     = 10;
-  int  buzzerDuration = 10;
+  int  buzzerDuration = 5;
   bool buzzerAtivo    = false;
   bool buzzerEnabled  = true;
 #endif
@@ -435,9 +435,9 @@ void ativarAncora() {
     #endif
     #ifdef USE_BUZZER
       if (buzzerEnabled) {
-        digitalWrite(buz, HIGH); delay(300);
-        digitalWrite(buz, LOW);  delay(100);
-        digitalWrite(buz, HIGH); delay(300);
+        digitalWrite(buz, HIGH); delay(150);
+        digitalWrite(buz, LOW);  delay(50);
+        digitalWrite(buz, HIGH); delay(150);
         digitalWrite(buz, LOW);
       }
     #endif
@@ -482,7 +482,7 @@ void desativarAncora() {
   motorWrite(left,  0);
   motorWrite(right, 0);
   #ifdef USE_BUZZER
-    if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW); }
+    if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(1500); digitalWrite(buz, LOW); }
   #endif
 }
 
@@ -523,13 +523,13 @@ void processBlecmd(const String& cmd) {
       northHeadingTarget = heading;
       giroIntegral = 0; lastGiroError = 0; lastGiroTime = millis();
       #ifdef USE_BUZZER
-        if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); }
+        if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(150); digitalWrite(buz, LOW); }
       #endif
     } else {
       giroIntegral = 0; lastGiroError = 0; headIntegral = 0; lastHeadError = 0;
       if (motorLigado) motorWrite(acelerador, 0);
       #ifdef USE_BUZZER
-        if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(700); digitalWrite(buz, LOW); }
+        if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(1500); digitalWrite(buz, LOW); }
       #endif
     }
   }
@@ -1165,13 +1165,13 @@ void loop() {
       if (northMode) {
         northHeadingTarget=heading; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
         #ifdef USE_BUZZER
-          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(300); digitalWrite(buz,LOW); }
+          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(150); digitalWrite(buz,LOW); }
         #endif
       } else {
         giroIntegral=0; lastGiroError=0; headIntegral=0; lastHeadError=0;
         if (motorLigado) motorWrite(acelerador,0);
         #ifdef USE_BUZZER
-          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(700); digitalWrite(buz,LOW); }
+          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(1500); digitalWrite(buz,LOW); }
         #endif
       }
       delay(300); return;
