@@ -18,13 +18,16 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  int _pwmHelMin = 0;
-  StreamSubscription? _hmnSub;
+  int  _pwmHelMin     = 0;
   bool _apontandoNorte = false;
-  bool _buzzerEnabled = true;
-  StreamSubscription? _buzzerSub;
+  bool _buzzerEnabled  = true;
+  int  _headingOffset  = 0;
   List<RemoteInfo> _remotes = [];
+
+  StreamSubscription? _hmnSub;
+  StreamSubscription? _buzzerSub;
   StreamSubscription? _remotesSub;
+  StreamSubscription? _hofSub;
 
   // OTA state
   String? _latestVersion;
@@ -34,10 +37,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _pwmHelMin = widget.initialPwmHelMin;
-    _hmnSub    = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
-    _buzzerSub = widget.ble.buzzerStream.listen((v) => setState(() => _buzzerEnabled = v));
+    _pwmHelMin  = widget.initialPwmHelMin;
+    _hmnSub     = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
+    _buzzerSub  = widget.ble.buzzerStream.listen((v) => setState(() => _buzzerEnabled = v));
     _remotesSub = widget.ble.remotesStream.listen((v) => setState(() => _remotes = v));
+    _hofSub     = widget.ble.headingOffsetStream.listen((v) => setState(() => _headingOffset = v));
   }
 
   @override
@@ -45,7 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hmnSub?.cancel();
     _buzzerSub?.cancel();
     _remotesSub?.cancel();
-    // Garante que o modo aponta-norte para ao sair da tela
+    _hofSub?.cancel();
     if (_apontandoNorte) widget.ble.sendPararNorte();
     super.dispose();
   }
@@ -69,6 +73,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } else {
       await widget.ble.sendBuzzerOff();
     }
+  }
+
+  Future<void> _changeOffset(int delta) async {
+    if (!_verificarBLE()) return;
+    final newVal = (_headingOffset + delta).clamp(-180, 180);
+    await widget.ble.sendHeadingOffset(newVal);
+  }
+
+  Future<void> _resetOffset() async {
+    if (!_verificarBLE()) return;
+    await widget.ble.sendHeadingOffset(0);
   }
 
   Future<void> _toggleApontarNorte() async {
@@ -118,7 +133,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true || !mounted) return;
 
-    // Envia comando e mostra progresso por 22 segundos
     await widget.ble.sendCalibrate();
     if (!mounted) return;
 
@@ -195,168 +209,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle('Motor'),
-          const SizedBox(height: 12),
 
-          // ── PWM Mínimo da Hélice ─────────────────────────────────
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _kPanel,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('PWM Mínimo da Hélice',
-                    style: TextStyle(color: Colors.white70, fontSize: 13)),
-                const SizedBox(height: 4),
-                const Text(
-                  'Valor mínimo de PWM para o motor sair da inércia na água. '
-                  'Pressione + ou – com o barco na água até o motor começar a girar.',
-                  style: TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _PwmBtn(
-                      label: '–',
-                      onPressed: _pwmHelMin > 0 ? _decrementPwm : null,
-                    ),
-                    const SizedBox(width: 24),
-                    Column(
-                      children: [
-                        Text(
-                          '$_pwmHelMin',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 40,
-                            fontWeight: FontWeight.bold,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        const Text('/ 255', style: TextStyle(color: Colors.white38, fontSize: 12)),
-                      ],
-                    ),
-                    const SizedBox(width: 24),
-                    _PwmBtn(
-                      label: '+',
-                      onPressed: _pwmHelMin < 255 ? _incrementPwm : null,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: _pwmHelMin / 255.0,
-                  backgroundColor: Colors.white12,
-                  valueColor: const AlwaysStoppedAnimation<Color>(_kGold),
-                  borderRadius: BorderRadius.circular(4),
-                  minHeight: 6,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-
-          // ── Calibracao bussola ───────────────────────────────────
-          _SectionTitle('Bússola'),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _kPanel,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Calibração de Campo',
-                    style: TextStyle(color: Colors.white70, fontSize: 13)),
-                const SizedBox(height: 4),
-                const Text(
-                  'Realiza a calibração do magnetômetro HMC5883L. '
-                  'O motor girará 360° para cada lado. Execute com o barco na água.',
-                  style: TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _kGoldDim,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    icon: const Icon(Icons.explore),
-                    label: const Text('Calibrar Bússola', style: TextStyle(fontSize: 15)),
-                    onPressed: _calibrate,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _apontandoNorte ? Colors.red.shade800 : _kPanel,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(
-                          color: _apontandoNorte ? Colors.red.shade400 : _kGoldDim,
-                          width: 1.5,
-                        ),
-                      ),
-                    ),
-                    icon: Icon(_apontandoNorte ? Icons.stop_circle_outlined : Icons.navigation),
-                    label: Text(
-                      _apontandoNorte ? 'Parar' : 'Apontar para Norte (0°)',
-                      style: const TextStyle(fontSize: 15),
-                    ),
-                    onPressed: _toggleApontarNorte,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Buzzer ──────────────────────────────────────────────
-          const SizedBox(height: 28),
-          _SectionTitle('Buzzer'),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: _kPanel,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.volume_up_outlined, color: _kGoldDim, size: 22),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text('Buzzer do motor',
-                      style: TextStyle(color: Colors.white70, fontSize: 14)),
-                ),
-                Switch(
-                  value: _buzzerEnabled,
-                  activeThumbColor: _kDark,
-                  activeTrackColor: _kGold,
-                  inactiveThumbColor: Colors.grey,
-                  inactiveTrackColor: Colors.white12,
-                  onChanged: _toggleBuzzer,
-                ),
-              ],
-            ),
-          ),
-
-          // ── Controles Remotos ────────────────────────────────────
-          const SizedBox(height: 28),
+          // ── 1. Controles Remotos ─────────────────────────────────
           _SectionTitle('Controles Remotos'),
           const SizedBox(height: 12),
           if (_remotes.isEmpty)
@@ -493,40 +347,247 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
 
-          // ── Procurar novo motor ──────────────────────────────────
-          const SizedBox(height: 24),
-          GestureDetector(
-            onTap: () async {
-              await widget.ble.disconnect();
-              await BleService.clearSavedDevice();
-              if (context.mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const ScanScreen()),
-                  (route) => false,
-                );
-              }
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _kGoldDim, width: 1.5),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.bluetooth_searching, color: _kGoldDim, size: 20),
-                  SizedBox(width: 8),
-                  Text('Procurar novo motor',
-                      style: TextStyle(color: _kGoldDim, fontSize: 14, fontWeight: FontWeight.w500)),
-                ],
-              ),
+          // ── 2. Buzzer ────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionTitle('Buzzer'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: _kPanel,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.volume_up_outlined, color: _kGoldDim, size: 22),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Buzzer do motor',
+                      style: TextStyle(color: Colors.white70, fontSize: 14)),
+                ),
+                Switch(
+                  value: _buzzerEnabled,
+                  activeThumbColor: _kDark,
+                  activeTrackColor: _kGold,
+                  inactiveThumbColor: Colors.grey,
+                  inactiveTrackColor: Colors.white12,
+                  onChanged: _toggleBuzzer,
+                ),
+              ],
             ),
           ),
 
-          // ── Atualização de Firmware (OTA) ────────────────────────
-          const SizedBox(height: 30),
-          _SectionTitle('ATUALIZAÇÃO DE FIRMWARE'),
+          // ── 3. Calibrações ───────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionTitle('Calibrações'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _kPanel,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+
+                // ── Calibrar Bússola ──────────────────────────────
+                const Text('Calibrar Bússola',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Realiza a calibração do magnetômetro HMC5883L. '
+                  'O motor girará 360° para cada lado. Execute com o barco na água.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _kGoldDim,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.explore),
+                    label: const Text('Calibrar Bússola', style: TextStyle(fontSize: 15)),
+                    onPressed: _calibrate,
+                  ),
+                ),
+
+                // ── Offset da Bússola ─────────────────────────────
+                const SizedBox(height: 20),
+                Divider(color: _kGoldDim.withValues(alpha: 0.3), height: 1),
+                const SizedBox(height: 16),
+                const Text('Offset da Bússola',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Corrija o desvio de direção da âncora. '
+                  'Ative a âncora, afaste o barco e ajuste até o motor apontar corretamente. '
+                  'Salvo automaticamente no motor.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _OffsetBtn(
+                      label: '–',
+                      onPressed: _headingOffset > -180
+                          ? () => _changeOffset(-1)
+                          : null,
+                    ),
+                    const SizedBox(width: 20),
+                    Column(
+                      children: [
+                        Text(
+                          '${_headingOffset >= 0 ? '+' : ''}$_headingOffset°',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        const Text('offset', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                      ],
+                    ),
+                    const SizedBox(width: 20),
+                    _OffsetBtn(
+                      label: '+',
+                      onPressed: _headingOffset < 180
+                          ? () => _changeOffset(1)
+                          : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _kGoldDim,
+                      side: const BorderSide(color: _kGoldDim),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.restart_alt, size: 18),
+                    label: const Text('Resetar offset', style: TextStyle(fontSize: 13)),
+                    onPressed: _headingOffset != 0 ? _resetOffset : null,
+                  ),
+                ),
+
+                // ── Apontar para Norte ────────────────────────────
+                const SizedBox(height: 20),
+                Divider(color: _kGoldDim.withValues(alpha: 0.3), height: 1),
+                const SizedBox(height: 16),
+                const Text('Apontar para Norte',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Gira o motor para 0° (Norte) com PWM fixo. '
+                  'Útil para verificar a calibração da bússola.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _apontandoNorte ? Colors.red.shade800 : _kPanel,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(
+                          color: _apontandoNorte ? Colors.red.shade400 : _kGoldDim,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                    icon: Icon(_apontandoNorte ? Icons.stop_circle_outlined : Icons.navigation),
+                    label: Text(
+                      _apontandoNorte ? 'Parar' : 'Apontar para Norte (0°)',
+                      style: const TextStyle(fontSize: 15),
+                    ),
+                    onPressed: _toggleApontarNorte,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── 4. Motor ─────────────────────────────────────────────
+          const SizedBox(height: 28),
+          _SectionTitle('Motor'),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _kPanel,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kGoldDim.withValues(alpha: 0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('PWM Mínimo da Hélice',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Valor mínimo de PWM para o motor sair da inércia na água. '
+                  'Pressione + ou – com o barco na água até o motor começar a girar.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _PwmBtn(
+                      label: '–',
+                      onPressed: _pwmHelMin > 0 ? _decrementPwm : null,
+                    ),
+                    const SizedBox(width: 24),
+                    Column(
+                      children: [
+                        Text(
+                          '$_pwmHelMin',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 40,
+                            fontWeight: FontWeight.bold,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        const Text('/ 255', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(width: 24),
+                    _PwmBtn(
+                      label: '+',
+                      onPressed: _pwmHelMin < 255 ? _incrementPwm : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(
+                  value: _pwmHelMin / 255.0,
+                  backgroundColor: Colors.white12,
+                  valueColor: const AlwaysStoppedAnimation<Color>(_kGold),
+                  borderRadius: BorderRadius.circular(4),
+                  minHeight: 6,
+                ),
+              ],
+            ),
+          ),
+
+          // ── 5. Atualização de Firmware (OTA) ─────────────────────
+          const SizedBox(height: 28),
+          _SectionTitle('Atualização de Firmware'),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -563,6 +624,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 )),
               ],
             ]),
+
+          // ── 6. Procurar novo motor ────────────────────────────────
+          const SizedBox(height: 28),
+          GestureDetector(
+            onTap: () async {
+              await widget.ble.disconnect();
+              await BleService.clearSavedDevice();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const ScanScreen()),
+                  (route) => false,
+                );
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _kGoldDim, width: 1.5),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.bluetooth_searching, color: _kGoldDim, size: 20),
+                  SizedBox(width: 8),
+                  Text('Procurar novo motor',
+                      style: TextStyle(color: _kGoldDim, fontSize: 14, fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 20),
         ],
       ),
@@ -591,6 +683,36 @@ class _PwmBtn extends StatelessWidget {
   final String label;
   final Future<void> Function()? onPressed;
   const _PwmBtn({required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: onPressed != null ? _kGold : Colors.grey.shade800,
+        ),
+        child: Center(
+          child: Text(label,
+              style: TextStyle(
+                color: onPressed != null ? _kDark : Colors.white38,
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+              )),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Offset +/- button ─────────────────────────────────────────────────────────
+class _OffsetBtn extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  const _OffsetBtn({required this.label, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {

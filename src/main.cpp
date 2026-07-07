@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.52"
+#define FIRMWARE_VERSION "1.1.54"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -118,6 +118,7 @@ unsigned long anchorStartTime = 0;
 
 // ================= HEADING =================
 float heading           = 0;
+int   headingOffset     = 0;
 long  lastCompassReaded = 0;
 long  updateGiro        = 0;
 #ifdef USE_BUZZER
@@ -657,12 +658,24 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$CFG?") {
     bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
     bleSend("$VER:" + String(FIRMWARE_VERSION) + "\n");
+    bleSend("$HOF:" + String(headingOffset) + "\n");
     #ifdef USE_BUZZER
       bleSend("$BUZ:" + String(buzzerEnabled ? 1 : 0) + "\n");
     #endif
     #ifdef USE_NRF
       bleSend(buildRemMsg());
     #endif
+  }
+  else if (cmd == "$HOF?") {
+    bleSend("$HOF:" + String(headingOffset) + "\n");
+  }
+  else if (cmd.startsWith("$HOF:")) {
+    int val = constrain(cmd.substring(5).toInt(), -180, 180);
+    headingOffset = val;
+    prefs.begin("barco", false);
+    prefs.putInt("hdgOff", headingOffset);
+    prefs.end();
+    bleSend("$HOF:" + String(headingOffset) + "\n");
   }
   // --- Buzzer ---
   #ifdef USE_BUZZER
@@ -837,8 +850,9 @@ void setup() {
 
   // --- NVS: carrega configuracoes persistidas ---
   prefs.begin("barco", true);
-  pwmHeliceMin = prefs.getInt("pwmHelMin",   0);
-  pwmMotorOff  = prefs.getInt("pwmMotorOff", 0);
+  pwmHeliceMin  = prefs.getInt("pwmHelMin",   0);
+  pwmMotorOff   = prefs.getInt("pwmMotorOff", 0);
+  headingOffset = prefs.getInt("hdgOff",      0);
   #ifdef USE_BUZZER
     buzzerEnabled = prefs.getBool("buzzerOn", true);
   #endif
@@ -1384,7 +1398,8 @@ void loop() {
   // ========================================================
   if (anchorMode && bearingReady && (millis() - updateGiro) > 100) {
     if (distancia >= giroMinDist) {
-      anchorHeadError = bearingFiltered - (double)heading;
+      double correctedHeading = (double)heading + (double)headingOffset;
+      anchorHeadError = bearingFiltered - correctedHeading;
       if (anchorHeadError >  180.0) anchorHeadError -= 360.0;
       if (anchorHeadError < -180.0) anchorHeadError += 360.0;
 
