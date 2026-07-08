@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.55"
+#define FIRMWARE_VERSION "1.1.56"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -554,7 +554,10 @@ void processBlecmd(const String& cmd) {
   // --- Aceleracao ---
   else if (cmd == "$ACE+") {
     aceleracao = constrain(aceleracao + 5, 0, 255);
-    if (motorLigado) motorWrite(acelerador, aceleracao);
+    if (motorLigado) {
+      if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
+      motorWrite(acelerador, aceleracao);
+    }
     #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
       digitalWrite(buz, LOW);
@@ -1210,7 +1213,7 @@ void loop() {
       delay(300); return;
     }
     if (northMode) {
-      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
       if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; if(motorLigado) motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
       if (cmd[0]=='1'){
         motorLigado=!motorLigado;
@@ -1224,7 +1227,7 @@ void loop() {
         if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
         else { motorWrite(acelerador, pwmMotorOff); }
       }
-      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
       if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
       if (cmd[1]=='1'){ motorWrite(left,230); motorWrite(right,0); tempoLigadoGiro=millis(); }
       else if (cmd[2]=='1'){ motorWrite(right,230); motorWrite(left,0); tempoLigadoGiro=millis(); }
