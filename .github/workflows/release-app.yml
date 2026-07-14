@@ -38,12 +38,12 @@ jobs:
           VERSION="${{ github.ref_name }}"           # ex: app-v1.0.1
           VERSION="${VERSION#app-v}"                  # ex: 1.0.1
           mv barco_app/build/app/outputs/flutter-apk/app-release.apk \
-             BragaPesca-${VERSION}.apk
+             PescaPlus-${VERSION}.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: BragaPesca-*.apk
+          path: PescaPlus-*.apk
           retention-days: 1
 
   # ── Job 2: iOS IPA ────────────────────────────────────────────────────────
@@ -73,12 +73,12 @@ jobs:
           VERSION="${VERSION#app-v}"
           mkdir -p Payload
           cp -r barco_app/build/ios/iphoneos/Runner.app Payload/
-          zip -r BragaPesca-${VERSION}.ipa Payload/
+          zip -r PescaPlus-${VERSION}.ipa Payload/
 
       - uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: BragaPesca-*.ipa
+          path: PescaPlus-*.ipa
           retention-days: 1
 
   # ── Job 3: Cria o release com os dois artefatos ────────────────────────────
@@ -109,23 +109,23 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#app-v}"
-          APK="artifacts/BragaPesca-${VERSION}.apk"
-          IPA="artifacts/BragaPesca-${VERSION}.ipa"
+          APK="artifacts/PescaPlus-${VERSION}.apk"
+          IPA="artifacts/PescaPlus-${VERSION}.ipa"
 
           {
-            echo "## App Braga Pesca v${VERSION}"
+            echo "## App Pesca Plus v${VERSION}"
             echo ""
             echo "### Android"
-            echo "Baixe o arquivo **BragaPesca-${VERSION}.apk** e instale diretamente no dispositivo."
+            echo "Baixe o arquivo **PescaPlus-${VERSION}.apk** e instale diretamente no dispositivo."
             echo "> Habilite \"Fontes desconhecidas\" em Configurações → Segurança se necessário."
             echo ""
             echo "### iOS"
-            echo "O arquivo **BragaPesca-${VERSION}.ipa** é não-assinado — instalação via **AltStore** ou **Sideloadly**."
+            echo "O arquivo **PescaPlus-${VERSION}.ipa** é não-assinado — instalação via **AltStore** ou **Sideloadly**."
             echo "> Não disponível na App Store. Requer re-sign anual se usar conta Apple gratuita."
           } > notes.md
 
           gh release create "${{ github.ref_name }}" \
             "$APK" \
             "$IPA" \
-            --title "App Braga Pesca v${VERSION}" \
+            --title "App Pesca Plus v${VERSION}" \
             --notes-file notes.md
