@@ -58,7 +58,7 @@ class _ScanScreenState extends State<ScanScreen> {
         _scanning = false;
         _bleError = 'Bluetooth desligado ou permissão negada.\n\n'
             'iOS: Ajustes > Privacidade e Segurança > Bluetooth\n'
-            'e ative para "Braga Pesca"';
+            'e ative para "Pesca Plus"';
       });
       return;
     }
@@ -79,6 +79,14 @@ class _ScanScreenState extends State<ScanScreen> {
     await Future.delayed(const Duration(seconds: 10));
     await FlutterBluePlus.stopScan();
     setState(() { _scanning = false; _scanDone = true; });
+  }
+
+  void _continueOffline() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => AppShell(ble: BleService(), startOffline: true),
+      ),
+    );
   }
 
   Future<void> _connect(BluetoothDevice device) async {
@@ -127,9 +135,27 @@ class _ScanScreenState extends State<ScanScreen> {
 
     return Scaffold(
       backgroundColor: _kDark,
+      bottomNavigationBar: (_scanDone && _results.isEmpty)
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: OutlinedButton(
+                  onPressed: _continueOffline,
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: _kGoldDim),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30)),
+                  ),
+                  child: const Text('Continuar sem conectar',
+                      style: TextStyle(color: _kGoldDim)),
+                ),
+              ),
+            )
+          : null,
       appBar: AppBar(
         backgroundColor: _kPanel,
-        title: const Text('Braga Pesca',
+        title: const Text('Pesca Plus',
             style: TextStyle(color: _kGold, fontWeight: FontWeight.bold, letterSpacing: 1)),
         centerTitle: true,
       ),
@@ -190,7 +216,7 @@ class _ScanScreenState extends State<ScanScreen> {
                         ),
                         child: ListTile(
                           leading: const Icon(Icons.bluetooth, color: _kGold),
-                          title: const Text('BragaPesca',
+                          title: const Text('Pesca Plus',
                               style: TextStyle(color: Colors.white,
                                   fontWeight: FontWeight.bold)),
                           subtitle: Text(r.device.remoteId.toString(),

@@ -16,7 +16,8 @@ const _kPanel   = Color(0xFF1A1A10);
 class AppShell extends StatefulWidget {
   final BleService ble;
   final bool autoReconnect;
-  const AppShell({super.key, required this.ble, this.autoReconnect = false});
+  final bool startOffline;
+  const AppShell({super.key, required this.ble, this.autoReconnect = false, this.startOffline = false});
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -38,7 +39,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    _isConnected = !widget.autoReconnect;
+    _isConnected = !widget.autoReconnect && !widget.startOffline;
     _telSub  = widget.ble.telemetryStream.listen((t) => setState(() => _tel = t));
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
@@ -148,7 +149,7 @@ class _AppShellState extends State<AppShell> {
               children: [
                 Image.asset('assets/logo_braga_pesca.png', height: 28),
                 const SizedBox(width: 10),
-                const Text('Braga Pesca',
+                const Text('Pesca Plus',
                     style: TextStyle(color: _kGold, fontSize: 16,
                         fontWeight: FontWeight.bold, letterSpacing: 1)),
               ],
