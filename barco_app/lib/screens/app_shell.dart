@@ -32,6 +32,7 @@ class _AppShellState extends State<AppShell> {
   bool _isReconnecting = false;
   bool _manualDisconnect = false;
   int _pwmHelMin = 0;
+  final _otaRunning = ValueNotifier<bool>(false);
 
   static const _tabLabels = ['Controle', 'Mapa', 'Config'];
   static const _tabIcons  = [Icons.sports_esports, Icons.map, Icons.settings];
@@ -43,6 +44,7 @@ class _AppShellState extends State<AppShell> {
     _telSub  = widget.ble.telemetryStream.listen((t) => setState(() => _tel = t));
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
+    _otaRunning.addListener(() { if (mounted) setState(() {}); });
     if (widget.autoReconnect) {
       _scheduleReconnect();
     }
@@ -127,6 +129,7 @@ class _AppShellState extends State<AppShell> {
     _telSub?.cancel();
     _connSub?.cancel();
     _hmnSub?.cancel();
+    _otaRunning.dispose();
     super.dispose();
   }
 
@@ -135,7 +138,7 @@ class _AppShellState extends State<AppShell> {
     final screens = [
       RemoteScreen(ble: widget.ble, tel: _tel),
       MapScreen(ble: widget.ble, tel: _tel),
-      SettingsScreen(ble: widget.ble, initialPwmHelMin: _pwmHelMin),
+      SettingsScreen(ble: widget.ble, initialPwmHelMin: _pwmHelMin, otaRunning: _otaRunning),
     ];
 
     return Stack(
@@ -172,7 +175,18 @@ class _AppShellState extends State<AppShell> {
               child: Row(
                 children: List.generate(3, (i) => Expanded(
                   child: InkWell(
-                    onTap: () => setState(() => _selectedIndex = i),
+                    onTap: () {
+                      if (_otaRunning.value) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Atualização de firmware em andamento. Aguarde o término.',
+                              style: TextStyle(color: Colors.white)),
+                          backgroundColor: Colors.orange,
+                          duration: Duration(seconds: 2),
+                        ));
+                        return;
+                      }
+                      setState(() => _selectedIndex = i);
+                    },
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(

@@ -11,7 +11,8 @@ const _kDark    = Color(0xFF0F0F08);
 class SettingsScreen extends StatefulWidget {
   final BleService ble;
   final int initialPwmHelMin;
-  const SettingsScreen({super.key, required this.ble, this.initialPwmHelMin = 0});
+  final ValueNotifier<bool>? otaRunning;
+  const SettingsScreen({super.key, required this.ble, this.initialPwmHelMin = 0, this.otaRunning});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -188,11 +189,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (confirm != true) return;
+    widget.otaRunning?.value = true;
     setState(() => _otaProgress = 0.0);
     final ok = await widget.ble.performOta(_otaUrl!, (p) {
       if (mounted) setState(() => _otaProgress = p);
     });
     setState(() => _otaProgress = null);
+    widget.otaRunning?.value = false;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(ok

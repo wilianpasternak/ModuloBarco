@@ -35,9 +35,46 @@ class _RemoteScreenState extends State<RemoteScreen> {
     return false;
   }
 
+  bool _verificarNorteInativo() {
+    if (!(widget.tel?.northActive ?? false)) return true;
+    if (!mounted) return false;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _kPanel,
+        title: const Row(children: [
+          Icon(Icons.navigation, color: _kGold, size: 22),
+          SizedBox(width: 8),
+          Text('Modo Norte Ativo', style: TextStyle(color: _kGold)),
+        ]),
+        content: const Text(
+          'O modo de apontamento para o norte está ativo.\n\n'
+          'Desative-o antes de controlar o motor.',
+          style: TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar', style: TextStyle(color: _kGoldDim)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _kGold),
+            onPressed: () {
+              Navigator.pop(context);
+              _toggleNorth();
+            },
+            child: const Text('Desativar Norte', style: TextStyle(color: _kDark)),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   // ── Acelerador hold ──────────────────────────────────────────────
   void _startAcel(bool plus) {
     if (!_verificarBLE()) return;
+    if (!_verificarNorteInativo()) return;
     _sendAcelOnce(plus);
     _acelTimer = Timer.periodic(const Duration(milliseconds: 120), (_) => _sendAcelOnce(plus));
   }
@@ -59,6 +96,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
 
   void _startGiro(bool right) {
     if (!_verificarBLE()) return;
+    if (!_verificarNorteInativo()) return;
     _giroTimer?.cancel();
     final send = right ? widget.ble.sendGiroDirStart : widget.ble.sendGiroEsqStart;
     _giroStop = right ? widget.ble.sendGiroDirStop : widget.ble.sendGiroEsqStop;
@@ -75,6 +113,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
 
   Future<void> _toggleMotor() async {
     if (!_verificarBLE()) return;
+    if (!_verificarNorteInativo()) return;
     await widget.ble.sendToggleMotor();
   }
 
@@ -85,6 +124,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
 
   Future<void> _startUpChecked() async {
     if (!_verificarBLE()) return;
+    if (!_verificarNorteInativo()) return;
     _upDownTimer?.cancel();
     widget.ble.sendUpStart();
     _upDownTimer = Timer.periodic(const Duration(milliseconds: 100), (_) => widget.ble.sendUpStart());
@@ -98,6 +138,7 @@ class _RemoteScreenState extends State<RemoteScreen> {
 
   Future<void> _startDownChecked() async {
     if (!_verificarBLE()) return;
+    if (!_verificarNorteInativo()) return;
     _upDownTimer?.cancel();
     widget.ble.sendDownStart();
     _upDownTimer = Timer.periodic(const Duration(milliseconds: 100), (_) => widget.ble.sendDownStart());
