@@ -186,6 +186,7 @@ class _AppShellState extends State<AppShell> {
                         return;
                       }
                       setState(() => _selectedIndex = i);
+                      if (i == 2) widget.ble.sendRequestRemotes();
                     },
                     child: Container(
                       height: 48,

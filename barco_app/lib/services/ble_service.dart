@@ -25,14 +25,15 @@ class BleService {
   String _lineBuffer = '';
   String _firmwareVersion = '0.0.0';
 
-  final _telemetryController   = StreamController<Telemetry>.broadcast();
-  final _connectionController  = StreamController<bool>.broadcast();
-  final _pwmHelMinController   = StreamController<int>.broadcast();
-  final _versionController     = StreamController<String>.broadcast();
-  final _otaProgressController = StreamController<double>.broadcast();
-  final _buzzerController        = StreamController<bool>.broadcast();
-  final _remotesController       = StreamController<List<RemoteInfo>>.broadcast();
-  final _headingOffsetController = StreamController<int>.broadcast();
+  final _telemetryController      = StreamController<Telemetry>.broadcast();
+  final _connectionController     = StreamController<bool>.broadcast();
+  final _pwmHelMinController      = StreamController<int>.broadcast();
+  final _versionController        = StreamController<String>.broadcast();
+  final _otaProgressController    = StreamController<double>.broadcast();
+  final _buzzerController         = StreamController<bool>.broadcast();
+  final _remotesController        = StreamController<List<RemoteInfo>>.broadcast();
+  final _headingOffsetController  = StreamController<int>.broadcast();
+  final _remoteRegModeController  = StreamController<bool>.broadcast();
 
   Stream<Telemetry>        get telemetryStream      => _telemetryController.stream;
   Stream<bool>             get connectionStream     => _connectionController.stream;
@@ -42,6 +43,7 @@ class BleService {
   Stream<bool>             get buzzerStream         => _buzzerController.stream;
   Stream<List<RemoteInfo>> get remotesStream        => _remotesController.stream;
   Stream<int>              get headingOffsetStream  => _headingOffsetController.stream;
+  Stream<bool>             get remoteRegModeStream  => _remoteRegModeController.stream;
   String get firmwareVersion => _firmwareVersion;
 
   bool get isConnected => _device != null && (_device!.isConnected);
@@ -126,6 +128,9 @@ class BleService {
       } else if (line.startsWith('\$HOF:')) {
         final val = int.tryParse(line.substring(5));
         if (val != null) _headingOffsetController.add(val);
+      } else if (line.startsWith('\$RGM:')) {
+        final val = int.tryParse(line.substring(5));
+        if (val != null) _remoteRegModeController.add(val == 1);
       } else if (line.startsWith('\$REM:')) {
         final remotes = <RemoteInfo>[];
         final parts = line.substring(5).split(',');
@@ -189,6 +194,11 @@ class BleService {
 
   // --- Remover controle NRF (code = código de 5 dígitos) ---
   Future<void> sendRemoveRemote(String code) => sendCommand('\$RMC:$code');
+
+  // --- Controles NRF: solicitar lista e modo de cadastro ---
+  Future<void> sendRequestRemotes()    => sendCommand('\$RQL');
+  Future<void> sendRemoteRegEnable()   => sendCommand('\$RGE');
+  Future<void> sendRemoteRegDisable()  => sendCommand('\$RGD');
 
   // --- Offset de heading da âncora ---
   Future<void> sendHeadingOffset(int deg) => sendCommand('\$HOF:$deg');
@@ -305,5 +315,6 @@ class BleService {
     _buzzerController.close();
     _remotesController.close();
     _headingOffsetController.close();
+    _remoteRegModeController.close();
   }
 }

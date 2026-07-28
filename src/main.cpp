@@ -65,7 +65,8 @@ inline void motorWrite(int pin, int val) {
   uint32_t controlesMem[MAX_CONTROLES];
   int8_t   remoteBatt[MAX_CONTROLES] = {-1,-1,-1,-1,-1};
   unsigned long bootTime;
-  bool modoCadastro = true;
+  bool modoCadastro    = true;
+  bool modoCadastroBLE = false; // ativado via BLE $RGE, sem timeout de boot
   const unsigned long cadastroTimeout = 1500;
   long tempoLigadoGiro   = 0;
   long tempoLigadoUpDown = 0;
@@ -722,6 +723,18 @@ void processBlecmd(const String& cmd) {
     }
     bleSend(buildRemMsg());
   }
+  // --- Solicitar lista de controles / modo de cadastro via BLE ---
+  else if (cmd == "$RQL") {
+    bleSend(buildRemMsg());
+  }
+  else if (cmd == "$RGE") {
+    modoCadastroBLE = true;
+    bleSend("$RGM:1\n");
+  }
+  else if (cmd == "$RGD") {
+    modoCadastroBLE = false;
+    bleSend("$RGM:0\n");
+  }
   #endif
   // --- Aponta Norte: gira para 0° com PWM 120 e histerese 5° (calibracao bussola) ---
   else if (cmd == "$APN") {
@@ -1161,16 +1174,24 @@ void loop() {
     }
     #endif
 
-    if (modoCadastro) {
-      if      (text[0]=='1'){ salvarControle(0,controlID); modoCadastro=false; delay(2000); return; }
-      else if (text[1]=='1'){ salvarControle(1,controlID); modoCadastro=false; delay(2000); return; }
-      else if (text[2]=='1'){ salvarControle(2,controlID); modoCadastro=false; delay(2000); return; }
-      else if (text[3]=='1'){ salvarControle(3,controlID); modoCadastro=false; delay(2000); return; }
-      else if (text[4]=='1'){ salvarControle(4,controlID); modoCadastro=false; delay(2000); return; }
-      else if (text[5]=='1' && text[6]=='1'){ calibrarBussola(); modoCadastro=false; delay(2000); return; }
+    if (modoCadastro || modoCadastroBLE) {
+      auto _finalizarCadastro = [&](bool remoteRegistered) {
+        modoCadastro    = false;
+        modoCadastroBLE = false;
+        if (bleConnected) {
+          bleSend("$RGM:0\n");
+          if (remoteRegistered) bleSend(buildRemMsg());
+        }
+      };
+      if      (text[0]=='1'){ salvarControle(0,controlID); _finalizarCadastro(true);  delay(2000); return; }
+      else if (text[1]=='1'){ salvarControle(1,controlID); _finalizarCadastro(true);  delay(2000); return; }
+      else if (text[2]=='1'){ salvarControle(2,controlID); _finalizarCadastro(true);  delay(2000); return; }
+      else if (text[3]=='1'){ salvarControle(3,controlID); _finalizarCadastro(true);  delay(2000); return; }
+      else if (text[4]=='1'){ salvarControle(4,controlID); _finalizarCadastro(true);  delay(2000); return; }
+      else if (text[5]=='1' && text[6]=='1'){ calibrarBussola(); _finalizarCadastro(false); delay(2000); return; }
       else if (text[7]=='1'){
         apontaNorteMode=true; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
-        modoCadastro=false; delay(2000); return;
+        _finalizarCadastro(false); delay(2000); return;
       }
       return;
     }

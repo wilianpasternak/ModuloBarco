@@ -19,16 +19,18 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  int  _pwmHelMin     = 0;
+  int  _pwmHelMin      = 0;
   bool _apontandoNorte = false;
   bool _buzzerEnabled  = true;
   int  _headingOffset  = 0;
+  bool _registerMode   = false;
   List<RemoteInfo> _remotes = [];
 
   StreamSubscription? _hmnSub;
   StreamSubscription? _buzzerSub;
   StreamSubscription? _remotesSub;
   StreamSubscription? _hofSub;
+  StreamSubscription? _regModeSub;
 
   // OTA state
   String? _latestVersion;
@@ -43,6 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _buzzerSub  = widget.ble.buzzerStream.listen((v) => setState(() => _buzzerEnabled = v));
     _remotesSub = widget.ble.remotesStream.listen((v) => setState(() => _remotes = v));
     _hofSub     = widget.ble.headingOffsetStream.listen((v) => setState(() => _headingOffset = v));
+    _regModeSub = widget.ble.remoteRegModeStream.listen((v) => setState(() => _registerMode = v));
   }
 
   @override
@@ -51,6 +54,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _buzzerSub?.cancel();
     _remotesSub?.cancel();
     _hofSub?.cancel();
+    _regModeSub?.cancel();
+    if (_registerMode) widget.ble.sendRemoteRegDisable();
     if (_apontandoNorte) widget.ble.sendPararNorte();
     super.dispose();
   }
@@ -215,6 +220,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── 1. Controles Remotos ─────────────────────────────────
           _SectionTitle('Controles Remotos'),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _registerMode ? Colors.red.shade700 : _kPanel,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(
+                    color: _registerMode ? Colors.red.shade400 : _kGoldDim,
+                    width: 1.5,
+                  ),
+                ),
+              ),
+              icon: Icon(_registerMode ? Icons.cancel_outlined : Icons.settings_remote),
+              label: Text(
+                _registerMode ? 'Cancelar Cadastro' : 'Cadastrar Controle',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              onPressed: () async {
+                if (_registerMode) {
+                  await widget.ble.sendRemoteRegDisable();
+                } else {
+                  if (!_verificarBLE()) return;
+                  await widget.ble.sendRemoteRegEnable();
+                }
+              },
+            ),
+          ),
           const SizedBox(height: 12),
           if (_remotes.isEmpty)
             Container(
