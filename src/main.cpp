@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.61"
+#define FIRMWARE_VERSION "1.1.62"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
