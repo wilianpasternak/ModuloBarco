@@ -15,7 +15,7 @@ class RemoteInfo {
 const _serviceUuid        = '0000ffe0-0000-1000-8000-00805f9b34fb';
 const _characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
 const _otaCharUuid        = '0000ffe2-0000-1000-8000-00805f9b34fb';
-const _githubReleasesApi  = 'https://api.github.com/repos/wilianpasternak/ModuloBarco/releases/latest';
+const _githubReleasesApi  = 'https://api.github.com/repos/wilianpasternak/ModuloBarco/releases';
 const _savedDeviceKey     = 'saved_device_id';
 
 class BleService {
@@ -235,16 +235,24 @@ class BleService {
     try {
       final resp = await http.get(Uri.parse(_githubReleasesApi),
           headers: {'Accept': 'application/vnd.github.v3+json'});
-      if (resp.statusCode == 404) return {'version': null, 'url': null};
       if (resp.statusCode != 200) return null;
-      final json = resp.body;
-      final tagMatch = RegExp(r'"tag_name":"([^"]+)"').firstMatch(json);
-      final urlMatch = RegExp(r'"browser_download_url":"([^"]+\.bin)"').firstMatch(json);
-      if (tagMatch == null || urlMatch == null) return {'version': null, 'url': null};
-      return {
-        'version': tagMatch.group(1)!.replaceFirst('v', ''),
-        'url': urlMatch.group(1)!,
-      };
+      final releases = jsonDecode(resp.body) as List<dynamic>;
+      // Percorre releases mais recentes primeiro; ignora releases do app (app-v*)
+      for (final release in releases) {
+        final tag = (release['tag_name'] as String? ?? '');
+        if (!tag.startsWith('v') || tag.startsWith('app-')) continue;
+        final assets = release['assets'] as List<dynamic>? ?? [];
+        for (final asset in assets) {
+          final url = asset['browser_download_url'] as String? ?? '';
+          if (url.endsWith('.bin')) {
+            return {
+              'version': tag.replaceFirst('v', ''),
+              'url': url,
+            };
+          }
+        }
+      }
+      return {'version': null, 'url': null};
     } catch (_) {
       return null;
     }
