@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
@@ -267,6 +267,7 @@ class BleService {
       if (resp.statusCode != 200) return false;
       final bytes = resp.bodyBytes;
       final totalSize = bytes.length;
+      final md5sum = md5.convert(bytes).toString();
 
       // Chunk size = MTU - 3 bytes ATT overhead (safe para iOS e Android)
       // iOS sem requestMtu negocia ~185 → max write 182 bytes
@@ -274,7 +275,8 @@ class BleService {
       final chunkSize = (mtu - 3).clamp(20, 512);
 
       // Comando OTA_START com resposta (confiabilidade)
-      final startCmd = utf8.encode('OTA_START:$totalSize:new\n');
+      // Formato: OTA_START:<size>:<version>:<md5> — firmware usa MD5 para validar antes de bootar
+      final startCmd = utf8.encode('OTA_START:$totalSize:new:$md5sum\n');
       await _otaCharacteristic!.write(startCmd, withoutResponse: false);
       await Future.delayed(const Duration(milliseconds: 600));
 

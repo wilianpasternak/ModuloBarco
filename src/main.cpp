@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.62"
+#define FIRMWARE_VERSION "1.1.63"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -760,12 +760,17 @@ class OtaCharCallbacks : public NimBLECharacteristicCallbacks {
     // Check for text commands (OTA_START, OTA_END)
     String s = String(val.c_str());
     if (s.startsWith("OTA_START:")) {
-      // Format: OTA_START:<size>:<version>
-      int colon2 = s.indexOf(':', 10);
-      otaExpectedSize = s.substring(10, colon2).toInt();
-      String ver = (colon2 > 0) ? s.substring(colon2 + 1) : "?";
+      // Format: OTA_START:<size>:<version>:<md5>
+      int c1 = s.indexOf(':', 10);
+      int c2 = c1 > 0 ? s.indexOf(':', c1 + 1) : -1;
+      int c3 = c2 > 0 ? s.indexOf(':', c2 + 1) : -1;
+      otaExpectedSize = s.substring(10, c1 > 0 ? c1 : s.length()).toInt();
+      String ver = (c1 > 0 && c2 > 0) ? s.substring(c1 + 1, c2) : "?";
+      String md5 = (c3 > 0)            ? s.substring(c3 + 1)      : "";
+      md5.trim();
       #ifdef LOG_ENABLE
-        Serial.printf("[OTA] Start: %u bytes, version %s\n", otaExpectedSize, ver.c_str());
+        Serial.printf("[OTA] Start: %u bytes, ver %s, md5 %s\n",
+                      otaExpectedSize, ver.c_str(), md5.c_str());
       #endif
       if (!Update.begin(otaExpectedSize, U_FLASH)) {
         String err = "OTA_ERR:begin failed\n";
@@ -774,6 +779,7 @@ class OtaCharCallbacks : public NimBLECharacteristicCallbacks {
         otaActive = false;
         return;
       }
+      if (md5.length() == 32) Update.setMD5(md5.c_str());
       otaBytesReceived = 0;
       otaActive = true;
       String rdy = "OTA_READY\n";
@@ -782,6 +788,7 @@ class OtaCharCallbacks : public NimBLECharacteristicCallbacks {
     } else if (s.startsWith("OTA_END")) {
       if (!otaActive) return;
       otaActive = false;
+      // end(true) verifica MD5 se foi definido — rejeita firmware incompleto
       if (Update.end(true)) {
         String ok = "OTA_OK\n";
         pOtaChar->setValue((uint8_t*)ok.c_str(), ok.length());
@@ -789,6 +796,7 @@ class OtaCharCallbacks : public NimBLECharacteristicCallbacks {
         delay(500);
         ESP.restart();
       } else {
+        Update.abort();
         String err = "OTA_ERR:end failed\n";
         pOtaChar->setValue((uint8_t*)err.c_str(), err.length());
         pOtaChar->notify();
@@ -828,6 +836,7 @@ class BleServerCallbacks : public NimBLEServerCallbacks {
   }
   void onDisconnect(NimBLEServer* s) override {
     bleConnected = false;
+    if (otaActive) { otaActive = false; Update.abort(); }
     pararGiro();
     pararUpDown();
     s->startAdvertising();
