@@ -26,16 +26,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _registerMode   = false;
   List<RemoteInfo> _remotes = [];
 
+  // Opções avançadas
+  bool   _advancedVisible = false;
+  int    _calibTimeSeg    = 10;
+  double _sliderCalibPwm  = 64.0;  // (160-100)/100*90+10
+  double _sliderUsoPwm    = 91.3;  // (240-100)/155*90+10
+
   StreamSubscription? _hmnSub;
   StreamSubscription? _buzzerSub;
   StreamSubscription? _remotesSub;
   StreamSubscription? _hofSub;
   StreamSubscription? _regModeSub;
+  StreamSubscription? _advCfgSub;
 
   // OTA state
   String? _latestVersion;
   String? _otaUrl;
   double? _otaProgress;
+
+  // Conversões PWM ↔ percentual
+  double _pwmToCalibPct(int pwm) => (pwm - 100) / 100.0 * 90.0 + 10.0;
+  int    _calibPctToPwm(double p) => ((p - 10) / 90.0 * 100 + 100).round().clamp(100, 200);
+  double _pwmToUsoPct(int pwm)    => (pwm - 100) / 155.0 * 90.0 + 10.0;
+  int    _usoPctToPwm(double p)   => ((p - 10) / 90.0 * 155 + 100).round().clamp(100, 255);
 
   @override
   void initState() {
@@ -46,6 +59,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _remotesSub = widget.ble.remotesStream.listen((v) => setState(() => _remotes = v));
     _hofSub     = widget.ble.headingOffsetStream.listen((v) => setState(() => _headingOffset = v));
     _regModeSub = widget.ble.remoteRegModeStream.listen((v) => setState(() => _registerMode = v));
+    _advCfgSub  = widget.ble.advancedConfigStream.listen((cfg) => setState(() {
+      _calibTimeSeg   = cfg.calibTimeSeg;
+      _sliderCalibPwm = _pwmToCalibPct(cfg.calibPwmGiro);
+      _sliderUsoPwm   = _pwmToUsoPct(cfg.usoPwmGiro);
+    }));
   }
 
   @override
@@ -55,9 +73,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _remotesSub?.cancel();
     _hofSub?.cancel();
     _regModeSub?.cancel();
+    _advCfgSub?.cancel();
     if (_registerMode) widget.ble.sendRemoteRegDisable();
     if (_apontandoNorte) widget.ble.sendPararNorte();
     super.dispose();
+  }
+
+  Future<bool> _showPasswordDialog() async {
+    final controller = TextEditingController();
+    bool obscure = true;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: _kPanel,
+          title: const Row(children: [
+            Icon(Icons.admin_panel_settings_outlined, color: _kGold, size: 22),
+            SizedBox(width: 8),
+            Text('Opções Avançadas', style: TextStyle(color: _kGold)),
+          ]),
+          content: TextField(
+            controller: controller,
+            obscureText: obscure,
+            autofocus: true,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Senha',
+              hintStyle: const TextStyle(color: Colors.white38),
+              enabledBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: _kGoldDim)),
+              focusedBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: _kGold)),
+              suffixIcon: IconButton(
+                icon: Icon(obscure ? Icons.visibility_off : Icons.visibility,
+                    color: _kGoldDim, size: 20),
+                onPressed: () => setLocal(() => obscure = !obscure),
+              ),
+            ),
+            onSubmitted: (_) => Navigator.pop(ctx, true),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar', style: TextStyle(color: _kGoldDim)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _kGold),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Entrar', style: TextStyle(color: _kDark)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result != true) return false;
+    const adminPassword = 'Admin@2026';
+    final ok = controller.text == adminPassword;
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Senha incorreta.', style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 2),
+      ));
+    }
+    return ok;
   }
 
   bool _verificarBLE() {
@@ -221,6 +300,183 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── 1. Controles Remotos ─────────────────────────────────
           _SectionTitle('Controles Remotos'),
           const SizedBox(height: 12),
+
+          // ── Botão Opções Avançadas ────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _advancedVisible ? Colors.red.shade900 : _kDark,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(
+                    color: _advancedVisible ? Colors.red.shade400 : _kGoldDim,
+                    width: 1.5,
+                  ),
+                ),
+              ),
+              icon: Icon(_advancedVisible
+                  ? Icons.lock_open_outlined
+                  : Icons.admin_panel_settings_outlined),
+              label: Text(
+                _advancedVisible ? 'Ocultar Opções' : 'Opções Avançadas',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              onPressed: () async {
+                if (_advancedVisible) {
+                  setState(() => _advancedVisible = false);
+                } else {
+                  if (!_verificarBLE()) return;
+                  final ok = await _showPasswordDialog();
+                  if (!ok || !mounted) return;
+                  await widget.ble.sendRequestAdvancedConfig();
+                  setState(() => _advancedVisible = true);
+                }
+              },
+            ),
+          ),
+
+          // ── Painel de Opções Avançadas ────────────────────────────
+          if (_advancedVisible) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _kPanel,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.shade900.withValues(alpha: 0.7)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+
+                  // ── A) Tempo de Giro (Calibração) ─────────────────
+                  const Text('Tempo de Giro na Calibração',
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  const Text('Duração do giro para cada lado durante a calibração da bússola.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _AdvBtn(
+                        icon: Icons.remove,
+                        onPressed: _calibTimeSeg > 1
+                            ? () async {
+                                final v = _calibTimeSeg - 1;
+                                setState(() => _calibTimeSeg = v);
+                                await widget.ble.sendCalibTimeSeg(v);
+                              }
+                            : null,
+                      ),
+                      const SizedBox(width: 20),
+                      Column(
+                        children: [
+                          Text('$_calibTimeSeg',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.bold)),
+                          const Text('segundos',
+                              style: TextStyle(color: Colors.white38, fontSize: 11)),
+                        ],
+                      ),
+                      const SizedBox(width: 20),
+                      _AdvBtn(
+                        icon: Icons.add,
+                        onPressed: _calibTimeSeg < 10
+                            ? () async {
+                                final v = _calibTimeSeg + 1;
+                                setState(() => _calibTimeSeg = v);
+                                await widget.ble.sendCalibTimeSeg(v);
+                              }
+                            : null,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+                  Divider(color: _kGoldDim.withValues(alpha: 0.3), height: 1),
+                  const SizedBox(height: 16),
+
+                  // ── B) Força de Giro (Calibração) ──────────────────
+                  const Text('Força de Giro na Calibração',
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  const Text('Velocidade do motor durante a calibração da bússola.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    const Text('10%',
+                        style: TextStyle(color: Colors.white38, fontSize: 11)),
+                    Expanded(
+                      child: Slider(
+                        value: _sliderCalibPwm.clamp(10.0, 100.0),
+                        min: 10, max: 100,
+                        divisions: 90,
+                        activeColor: _kGold,
+                        inactiveColor: _kGoldDim.withValues(alpha: 0.3),
+                        label: '${_sliderCalibPwm.round()}%',
+                        onChanged: (v) => setState(() => _sliderCalibPwm = v),
+                        onChangeEnd: (v) =>
+                            widget.ble.sendCalibPwmGiro(_calibPctToPwm(v)),
+                      ),
+                    ),
+                    const Text('100%',
+                        style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  ]),
+                  Center(
+                    child: Text('${_sliderCalibPwm.round()}%',
+                        style: const TextStyle(
+                            color: _kGold, fontWeight: FontWeight.bold)),
+                  ),
+
+                  const SizedBox(height: 20),
+                  Divider(color: _kGoldDim.withValues(alpha: 0.3), height: 1),
+                  const SizedBox(height: 16),
+
+                  // ── C) Força de Giro (Uso manual) ─────────────────
+                  const Text('Força de Giro para Uso',
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  const Text('PWM máximo do motor de giro ao usar os controles remotos.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    const Text('10%',
+                        style: TextStyle(color: Colors.white38, fontSize: 11)),
+                    Expanded(
+                      child: Slider(
+                        value: _sliderUsoPwm.clamp(10.0, 100.0),
+                        min: 10, max: 100,
+                        divisions: 90,
+                        activeColor: _kGold,
+                        inactiveColor: _kGoldDim.withValues(alpha: 0.3),
+                        label: '${_sliderUsoPwm.round()}%',
+                        onChanged: (v) => setState(() => _sliderUsoPwm = v),
+                        onChangeEnd: (v) =>
+                            widget.ble.sendUsoPwmGiro(_usoPctToPwm(v)),
+                      ),
+                    ),
+                    const Text('100%',
+                        style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  ]),
+                  Center(
+                    child: Text('${_sliderUsoPwm.round()}%',
+                        style: const TextStyle(
+                            color: _kGold, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
+
+          // ── Botão Cadastrar Controle ──────────────────────────────
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -778,6 +1034,30 @@ class _OffsetBtn extends StatelessWidget {
 }
 
 // ── Gold outline button ───────────────────────────────────────────────────────
+// ── Advanced +/- button (spinner) ────────────────────────────────────────────
+class _AdvBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onPressed;
+  const _AdvBtn({required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: onPressed != null ? _kGoldDim : Colors.grey.shade800,
+        ),
+        child: Icon(icon,
+            color: onPressed != null ? Colors.white : Colors.white24, size: 22),
+      ),
+    );
+  }
+}
+
 class _GoldOutlineBtn extends StatelessWidget {
   final String label;
   final IconData icon;

@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.63"
+#define FIRMWARE_VERSION "1.1.64"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -147,10 +147,12 @@ double headIntegral = 0, lastHeadError = 0;
 double Kp_giro = 3.0, Ki_giro = 0.1, Kd_giro = 0.0;
 double giroIntegral = 0, lastGiroError = 0;
 const int    pwmGiroMin  = 150;
-const int    pwmGiroMax  = 240;
+int          usoPwmGiro  = 240;   // max PWM giro uso manual; NVS "usoPwmGiro"; default 240
 const double zonaForte   = 220.0;
 const int    pwmFinoMax  = 150;
 const int    pwmForteMin = 220;
+int          calibTimeSeg = 10;   // segundos por lado na calibracao bussola; NVS "calibTimeSeg"
+int          calibPwmGiro = 160;  // PWM giro na calibracao; NVS "calibPwmGiro"
 unsigned long lastGiroTime = 0;
 
 // ================= CONTROLE =================
@@ -275,8 +277,8 @@ void calibrarBussola() {
     if (buzzerEnabled) digitalWrite(buz, HIGH);
   #endif
   long t0 = millis();
-  motorWrite(left, 140); motorWrite(right, 0);
-  while (millis() - t0 < 9500) {
+  motorWrite(left, calibPwmGiro); motorWrite(right, 0);
+  while (millis() - t0 < (unsigned long)calibTimeSeg * 1000) {
     #ifdef USE_NRF
       tempoLigadoGiro = millis();  // impede NRF timeout de parar o motor durante calibracao
     #endif
@@ -292,8 +294,8 @@ void calibrarBussola() {
     if (buzzerEnabled) { digitalWrite(buz, LOW); delay(1000); digitalWrite(buz, HIGH); }
   #endif
   t0 = millis();
-  motorWrite(left, 0); motorWrite(right, 140);
-  while (millis() - t0 < 9500) {
+  motorWrite(left, 0); motorWrite(right, calibPwmGiro);
+  while (millis() - t0 < (unsigned long)calibTimeSeg * 1000) {
     #ifdef USE_NRF
       tempoLigadoGiro = millis();  // impede NRF timeout de parar o motor durante calibracao
     #endif
@@ -380,7 +382,7 @@ int calcPidGiro(double erro) {
   lastGiroError = erro;
   double pidOut = Kp_giro * erro + Ki_giro * giroIntegral + Kd_giro * deriv;
   int piso = (abs(erro) >= zonaForte) ? pwmForteMin : pwmGiroMin;
-  int teto = (abs(erro) >= zonaForte) ? pwmGiroMax  : pwmFinoMax;
+  int teto = (abs(erro) >= zonaForte) ? usoPwmGiro  : pwmFinoMax;
   return constrain((int)abs(pidOut), piso, teto);
 }
 
@@ -514,6 +516,10 @@ String buildRemMsg() {
 }
 #endif
 
+String buildAdvCfgMsg() {
+  return "$ACG:" + String(calibTimeSeg) + ":" + String(calibPwmGiro) + ":" + String(usoPwmGiro) + "\n";
+}
+
 // ================= PROCESSAMENTO DE COMANDOS BLE =================
 void processBlecmd(const String& cmd) {
   #ifdef USE_BUZZER
@@ -587,7 +593,7 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$GTR+") {
     if (!anchorMode) {
       giroDir = true; giroEsq = false;
-      motorWrite(right, 230); motorWrite(left, 0);
+      motorWrite(right, 250); motorWrite(left, 0);
       lastGiroCmdTime = millis();
       #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
@@ -605,7 +611,7 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$GTL+") {
     if (!anchorMode) {
       giroEsq = true; giroDir = false;
-      motorWrite(left, 230); motorWrite(right, 0);
+      motorWrite(left, 250); motorWrite(right, 0);
       lastGiroCmdTime = millis();
       #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
@@ -736,6 +742,25 @@ void processBlecmd(const String& cmd) {
     bleSend("$RGM:0\n");
   }
   #endif
+  // --- Configuracoes avancadas (leitura/escrita com persistencia NVS) ---
+  else if (cmd == "$ACG?") {
+    bleSend(buildAdvCfgMsg());
+  }
+  else if (cmd.startsWith("$CAT:")) {
+    calibTimeSeg = constrain(cmd.substring(5).toInt(), 1, 10);
+    prefs.begin("barco", false); prefs.putInt("calibTimeSeg", calibTimeSeg); prefs.end();
+    bleSend(buildAdvCfgMsg());
+  }
+  else if (cmd.startsWith("$CAP:")) {
+    calibPwmGiro = constrain(cmd.substring(5).toInt(), 100, 200);
+    prefs.begin("barco", false); prefs.putInt("calibPwmGiro", calibPwmGiro); prefs.end();
+    bleSend(buildAdvCfgMsg());
+  }
+  else if (cmd.startsWith("$GUP:")) {
+    usoPwmGiro = constrain(cmd.substring(5).toInt(), 100, 255);
+    prefs.begin("barco", false); prefs.putInt("usoPwmGiro", usoPwmGiro); prefs.end();
+    bleSend(buildAdvCfgMsg());
+  }
   // --- Aponta Norte: gira para 0° com PWM 120 e histerese 5° (calibracao bussola) ---
   else if (cmd == "$APN") {
     apontaNorteMode = true;
@@ -881,9 +906,12 @@ void setup() {
 
   // --- NVS: carrega configuracoes persistidas ---
   prefs.begin("barco", true);
-  pwmHeliceMin  = prefs.getInt("pwmHelMin",   0);
-  pwmMotorOff   = prefs.getInt("pwmMotorOff", 0);
-  headingOffset = prefs.getInt("hdgOff",      0);
+  pwmHeliceMin  = prefs.getInt("pwmHelMin",     0);
+  pwmMotorOff   = prefs.getInt("pwmMotorOff",  0);
+  headingOffset = prefs.getInt("hdgOff",        0);
+  calibTimeSeg  = prefs.getInt("calibTimeSeg", 10);
+  calibPwmGiro  = prefs.getInt("calibPwmGiro", 160);
+  usoPwmGiro    = prefs.getInt("usoPwmGiro",   240);
   #ifdef USE_BUZZER
     buzzerEnabled = prefs.getBool("buzzerOn", true);
   #endif

@@ -12,6 +12,17 @@ class RemoteInfo {
   const RemoteInfo({required this.code, required this.batt});
 }
 
+class AdvancedConfig {
+  final int calibTimeSeg;
+  final int calibPwmGiro;
+  final int usoPwmGiro;
+  const AdvancedConfig({
+    required this.calibTimeSeg,
+    required this.calibPwmGiro,
+    required this.usoPwmGiro,
+  });
+}
+
 const _serviceUuid        = '0000ffe0-0000-1000-8000-00805f9b34fb';
 const _characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
 const _otaCharUuid        = '0000ffe2-0000-1000-8000-00805f9b34fb';
@@ -34,6 +45,7 @@ class BleService {
   final _remotesController        = StreamController<List<RemoteInfo>>.broadcast();
   final _headingOffsetController  = StreamController<int>.broadcast();
   final _remoteRegModeController  = StreamController<bool>.broadcast();
+  final _advancedConfigController = StreamController<AdvancedConfig>.broadcast();
 
   Stream<Telemetry>        get telemetryStream      => _telemetryController.stream;
   Stream<bool>             get connectionStream     => _connectionController.stream;
@@ -44,6 +56,7 @@ class BleService {
   Stream<List<RemoteInfo>> get remotesStream        => _remotesController.stream;
   Stream<int>              get headingOffsetStream  => _headingOffsetController.stream;
   Stream<bool>             get remoteRegModeStream  => _remoteRegModeController.stream;
+  Stream<AdvancedConfig>   get advancedConfigStream => _advancedConfigController.stream;
   String get firmwareVersion => _firmwareVersion;
 
   bool get isConnected => _device != null && (_device!.isConnected);
@@ -131,6 +144,16 @@ class BleService {
       } else if (line.startsWith('\$RGM:')) {
         final val = int.tryParse(line.substring(5));
         if (val != null) _remoteRegModeController.add(val == 1);
+      } else if (line.startsWith('\$ACG:')) {
+        final parts = line.substring(5).split(':');
+        if (parts.length >= 3) {
+          final cfg = AdvancedConfig(
+            calibTimeSeg: int.tryParse(parts[0]) ?? 10,
+            calibPwmGiro: int.tryParse(parts[1]) ?? 160,
+            usoPwmGiro:   int.tryParse(parts[2]) ?? 240,
+          );
+          _advancedConfigController.add(cfg);
+        }
       } else if (line.startsWith('\$REM:')) {
         final remotes = <RemoteInfo>[];
         final parts = line.substring(5).split(',');
@@ -199,6 +222,12 @@ class BleService {
   Future<void> sendRequestRemotes()    => sendCommand('\$RQL');
   Future<void> sendRemoteRegEnable()   => sendCommand('\$RGE');
   Future<void> sendRemoteRegDisable()  => sendCommand('\$RGD');
+
+  // --- Configurações avançadas ---
+  Future<void> sendRequestAdvancedConfig()    => sendCommand('\$ACG?');
+  Future<void> sendCalibTimeSeg(int seconds)  => sendCommand('\$CAT:$seconds');
+  Future<void> sendCalibPwmGiro(int pwm)      => sendCommand('\$CAP:$pwm');
+  Future<void> sendUsoPwmGiro(int pwm)        => sendCommand('\$GUP:$pwm');
 
   // --- Offset de heading da âncora ---
   Future<void> sendHeadingOffset(int deg) => sendCommand('\$HOF:$deg');
@@ -326,5 +355,6 @@ class BleService {
     _remotesController.close();
     _headingOffsetController.close();
     _remoteRegModeController.close();
+    _advancedConfigController.close();
   }
 }
