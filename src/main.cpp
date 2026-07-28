@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.56"
+#define FIRMWARE_VERSION "1.1.61"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -100,8 +100,8 @@ volatile bool calibrando = false;
 double anchorLat = 0;
 double anchorLon = 0;
 const double anchorStopDistance  = 1.0;
-const double anchorStartDistance = 1.5;
-const double giroMinDist         = 1.5;
+const double anchorStartDistance = 1.0;
+const double giroMinDist         = 1.0;
 double distancia       = 0;
 int    pwmComHeading   = 0;
 bool   apontaNorteMode = false;
@@ -114,7 +114,9 @@ int    pwmHeliceMin    = 0;    // carregado da NVS no boot; default 0
 int    pwmMotorOff     = 0;    // pwmHeliceMin - 5: pre-carga no ESC sem girar (manual desligado)
 const int pwmRampStep  = 20;
 int       pwmRampAtual = 0;
-unsigned long anchorStartTime = 0;
+unsigned long anchorStartTime    = 0;
+float         cableAngle         = 0.0f; // ângulo acumulado do cabo desde ativação (°)
+float         cableTrackHeading  = 0.0f; // heading anterior para delta do cabo
 
 // ================= HEADING =================
 float heading           = 0;
@@ -425,9 +427,11 @@ void ativarAncora() {
     bearingReady    = false;
     lastDist        = -1;
     driftRate       = 0.0;
-    anchorHeadError = 0.0;
-    distancia       = 0.0;
-    anchorStartTime = millis();
+    anchorHeadError    = 0.0;
+    distancia          = 0.0;
+    anchorStartTime    = millis();
+    cableAngle         = 0.0f;
+    cableTrackHeading  = heading + (float)headingOffset;
     #ifdef LOG_ENABLE
       Serial.println(F("\n========== ANCORA ATIVADA =========="));
       Serial.print(F("  GPS age : ")); Serial.print(gps.location.age());
@@ -478,7 +482,9 @@ void desativarAncora() {
   bearingReady    = false;
   lastDist        = -1;
   driftRate       = 0.0;
-  anchorHeadError = 0.0;
+  anchorHeadError   = 0.0;
+  cableAngle        = 0.0f;
+  cableTrackHeading = 0.0f;
   motorWrite(acelerador, 0);
   motorWrite(left,  0);
   motorWrite(right, 0);
@@ -1044,12 +1050,14 @@ void setup() {
     Serial.println(F("Pronto.\n"));
   #endif
 
-  //#ifdef USE_BUZZER
-   // for (int i = 0; i < 5; i++) {
-   //   digitalWrite(buz, HIGH); delay(200); digitalWrite(buz, LOW); delay(200);
-  //  }
-    
-  //#endif
+  #ifdef USE_BUZZER
+    if (buzzerEnabled) {
+      digitalWrite(buz, LOW); delay(1000);
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(buz, HIGH); delay(80); digitalWrite(buz, LOW); delay (200);
+      }
+    }
+  #endif
 }
 
 // ================= LOOP =================
@@ -1360,6 +1368,7 @@ void loop() {
         Serial.print(F(" | G:"));     Serial.print(bearingFiltered, 1);
         Serial.print(F("/"));         Serial.print(heading, 1);
         Serial.print(F(" err="));     Serial.print(anchorHeadError, 1);
+        Serial.print(F(" cabo="));    Serial.print(cableAngle, 0); Serial.print(F("°"));
         Serial.print(F("["));         Serial.print(giroStr);
         Serial.print(F("] | H:"));    Serial.print(pwmComHeading);
         Serial.print(F("("));         Serial.print(pwmRampAtual);
@@ -1406,13 +1415,26 @@ void loop() {
       if (anchorHeadError >  180.0) anchorHeadError -= 360.0;
       if (anchorHeadError < -180.0) anchorHeadError += 360.0;
 
-      if (abs(anchorHeadError) <= headingDeadzone) {
+      // Rastreia ângulo acumulado do cabo a cada ciclo
+      float headDelta = (float)correctedHeading - cableTrackHeading;
+      if (headDelta >  180.0f) headDelta -= 360.0f;
+      if (headDelta < -180.0f) headDelta += 360.0f;
+      cableAngle += headDelta;
+      cableTrackHeading = (float)correctedHeading;
+
+      // Se cabo perto do limite (±300°), força direção que desenrola
+      double headError = anchorHeadError;
+      const float cableLimit = 300.0f;
+      if      (cableAngle >  cableLimit && headError > 0) headError -= 360.0;
+      else if (cableAngle < -cableLimit && headError < 0) headError += 360.0;
+
+      if (abs(headError) <= headingDeadzone) {
         motorWrite(left, 0); motorWrite(right, 0);
         giroIntegral = 0;
       } else {
-        int pwmGiro = calcPidGiro(anchorHeadError);
-        if (anchorHeadError > 0) { motorWrite(right, pwmGiro); motorWrite(left,  0); }
-        else                     { motorWrite(left,  pwmGiro); motorWrite(right, 0); }
+        int pwmGiro = calcPidGiro(headError);
+        if (headError > 0) { motorWrite(right, pwmGiro); motorWrite(left,  0); }
+        else               { motorWrite(left,  pwmGiro); motorWrite(right, 0); }
       }
     }
     updateGiro = millis();
