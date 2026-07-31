@@ -176,7 +176,7 @@ String        bleCmdBuffer      = "";
 #define BAT_ADC_PIN  34
 // Divisor R1=47kΩ R2=10kΩ → V_bat = V_adc * (47+10)/10
 const float BAT_DIVISOR     = 5.7f;
-const float BAT_CAL         = 1.0f;   // ajuste fino pós-calibração com multímetro
+const float BAT_CAL         = 1.064f; // calibrado: bateria 15V → divisor 2.614V → ADC lia 14.1V
 float         batVoltage    = 0.0f;
 int           batPercent    = -1;
 unsigned long lastBatRead   = 0;
