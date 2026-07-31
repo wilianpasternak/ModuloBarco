@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.64"
+#define FIRMWARE_VERSION "1.1.65"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -15,7 +15,7 @@
 #ifdef USE_NRF
   #include <SPI.h>
   #include <nRF24L01.h>
-  #include <RF24.h>
+  #include <RF24.h>          
 #endif
 
 // ================= BLE UUIDs =================
@@ -593,7 +593,7 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$GTR+") {
     if (!anchorMode) {
       giroDir = true; giroEsq = false;
-      motorWrite(right, 250); motorWrite(left, 0);
+      motorWrite(right, usoPwmGiro); motorWrite(left, 0);
       lastGiroCmdTime = millis();
       #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
@@ -611,7 +611,7 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$GTL+") {
     if (!anchorMode) {
       giroEsq = true; giroDir = false;
-      motorWrite(left, 250); motorWrite(right, 0);
+      motorWrite(left, usoPwmGiro); motorWrite(right, 0);
       lastGiroCmdTime = millis();
       #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
@@ -1295,8 +1295,8 @@ void loop() {
       }
       if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
       if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
-      if (cmd[1]=='1'){ motorWrite(left,230); motorWrite(right,0); tempoLigadoGiro=millis(); }
-      else if (cmd[2]=='1'){ motorWrite(right,230); motorWrite(left,0); tempoLigadoGiro=millis(); }
+      if (cmd[1]=='1'){ motorWrite(left,usoPwmGiro); motorWrite(right,0); tempoLigadoGiro=millis(); }
+      else if (cmd[2]=='1'){ motorWrite(right,usoPwmGiro); motorWrite(left,0); tempoLigadoGiro=millis(); }
       else if (!giroDir && !giroEsq && !calibrando){ motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis(); }
       if (cmd[5]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
       else if (cmd[6]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
