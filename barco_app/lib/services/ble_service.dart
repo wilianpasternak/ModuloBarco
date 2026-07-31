@@ -12,6 +12,12 @@ class RemoteInfo {
   const RemoteInfo({required this.code, required this.batt});
 }
 
+class BatteryInfo {
+  final double voltage;
+  final int percent;
+  const BatteryInfo({required this.voltage, required this.percent});
+}
+
 class AdvancedConfig {
   final int calibTimeSeg;
   final int calibPwmGiro;
@@ -46,6 +52,7 @@ class BleService {
   final _headingOffsetController  = StreamController<int>.broadcast();
   final _remoteRegModeController  = StreamController<bool>.broadcast();
   final _advancedConfigController = StreamController<AdvancedConfig>.broadcast();
+  final _batteryController        = StreamController<BatteryInfo>.broadcast();
 
   Stream<Telemetry>        get telemetryStream      => _telemetryController.stream;
   Stream<bool>             get connectionStream     => _connectionController.stream;
@@ -57,6 +64,7 @@ class BleService {
   Stream<int>              get headingOffsetStream  => _headingOffsetController.stream;
   Stream<bool>             get remoteRegModeStream  => _remoteRegModeController.stream;
   Stream<AdvancedConfig>   get advancedConfigStream => _advancedConfigController.stream;
+  Stream<BatteryInfo>      get batteryStream        => _batteryController.stream;
   String get firmwareVersion => _firmwareVersion;
 
   bool get isConnected => _device != null && (_device!.isConnected);
@@ -165,6 +173,13 @@ class BleService {
           if (code != '00000') remotes.add(RemoteInfo(code: code, batt: batt));
         }
         _remotesController.add(remotes);
+      } else if (line.startsWith('\$BAT:')) {
+        final parts = line.substring(5).split(':');
+        if (parts.length >= 2) {
+          final v = double.tryParse(parts[0]);
+          final p = int.tryParse(parts[1]);
+          if (v != null && p != null) _batteryController.add(BatteryInfo(voltage: v, percent: p));
+        }
       } else if (line.startsWith('\$')) {
         final t = Telemetry.fromLine(line);
         if (t != null) _telemetryController.add(t);
@@ -356,5 +371,6 @@ class BleService {
     _headingOffsetController.close();
     _remoteRegModeController.close();
     _advancedConfigController.close();
+    _batteryController.close();
   }
 }

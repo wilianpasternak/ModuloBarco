@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.65"
+#define FIRMWARE_VERSION "1.1.68"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -171,6 +171,18 @@ const unsigned long holdTimeout = 150;  // ms sem novo comando para parar
 // ================= TELEMETRIA / BUFFER RX =================
 unsigned long lastTelemetryTime = 0;
 String        bleCmdBuffer      = "";
+
+// ================= BATERIA (ADC) =================
+#define BAT_ADC_PIN  34
+// Divisor R1=47kΩ R2=10kΩ → V_bat = V_adc * (47+10)/10
+const float BAT_DIVISOR     = 5.7f;
+const float BAT_CAL         = 1.0f;   // ajuste fino pós-calibração com multímetro
+float         batVoltage    = 0.0f;
+int           batPercent    = -1;
+unsigned long lastBatRead   = 0;
+const unsigned long BAT_READ_INTERVAL = 10000UL; // 10s
+static int  voltToSocPb(float v);
+static void readBattery(bool forceSend = false);
 
 // ================= DEBUG =================
 #ifdef LOG_ENABLE
@@ -681,6 +693,7 @@ void processBlecmd(const String& cmd) {
     #ifdef USE_NRF
       bleSend(buildRemMsg());
     #endif
+    { char buf[32]; snprintf(buf, sizeof(buf), "$BAT:%.2f:%d\n", batVoltage, batPercent); bleSend(String(buf)); }
   }
   else if (cmd == "$HOF?") {
     bleSend("$HOF:" + String(headingOffset) + "\n");
@@ -916,6 +929,14 @@ void setup() {
     buzzerEnabled = prefs.getBool("buzzerOn", true);
   #endif
   prefs.end();
+
+  // --- ADC bateria (GPIO34 input-only, 11dB para range 0-3.3V) ---
+  analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
+  // Leitura inicial para ter valores prontos antes da primeira conexao BLE
+  { long s = 0; for (int i = 0; i < 16; i++) { s += analogRead(BAT_ADC_PIN); delay(1); }
+    float v = (s / 16.0f / 4095.0f) * 3.3f;
+    batVoltage = constrain(v * BAT_DIVISOR * BAT_CAL, 0.0f, 20.0f);
+    batPercent = voltToSocPb(batVoltage); }
   #ifdef LOG_ENABLE
     Serial.print(F("  pwmHeliceMin : ")); Serial.print(pwmHeliceMin);
     Serial.print(F("  pwmMotorOff  : ")); Serial.println(pwmMotorOff);
@@ -1027,7 +1048,7 @@ void setup() {
      // radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
       radio.setDataRate(RF24_250KBPS);
       radio.setPALevel(RF24_PA_MAX);
-      radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
+      //radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
       // Pipe 0 é reservado para TX/ACK — usar pipe 1 para recepção
       radio.openReadingPipe(1, address);
       radio.startListening();
@@ -1110,6 +1131,40 @@ void setup() {
   #endif
 }
 
+// ================= BATERIA — SoC e leitura ADC =================
+static int voltToSocPb(float v) {
+  // Curva SoC para bateria chumbo-ácido 12V (tensão em repouso)
+  static const float vt[] = {10.50f,11.51f,11.66f,11.81f,11.96f,12.10f,12.24f,12.37f,12.50f,12.62f,12.73f};
+  static const int   st[] = {0,     10,    20,    30,    40,    50,    60,    70,    80,    90,    100};
+  const int n = 11;
+  if (v <= vt[0])   return 0;
+  if (v >= vt[n-1]) return 100;
+  for (int i = 1; i < n; i++) {
+    if (v < vt[i]) {
+      float frac = (v - vt[i-1]) / (vt[i] - vt[i-1]);
+      return st[i-1] + (int)(frac * (float)(st[i] - st[i-1]));
+    }
+  }
+  return 100;
+}
+
+static void readBattery(bool forceSend) {
+  long sum = 0;
+  for (int i = 0; i < 16; i++) { sum += analogRead(BAT_ADC_PIN); delay(1); }
+  float vAdc = (sum / 16.0f / 4095.0f) * 3.3f;
+  float vBat = constrain(vAdc * BAT_DIVISOR * BAT_CAL, 0.0f, 20.0f);
+  int   pct  = voltToSocPb(vBat);
+  if (forceSend || fabsf(vBat - batVoltage) >= 0.05f || pct != batPercent) {
+    batVoltage = vBat;
+    batPercent = pct;
+    if (bleConnected) {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "$BAT:%.2f:%d\n", batVoltage, batPercent);
+      bleSend(String(buf));
+    }
+  }
+}
+
 // ================= LOOP =================
 void loop() {
 
@@ -1132,6 +1187,7 @@ void loop() {
     pendingHmnNotify = false;
     bleSend("$HMN:" + String(pwmHeliceMin) + "\n");
     bleSend("$VER:" + String(FIRMWARE_VERSION) + "\n");
+    { char buf[32]; snprintf(buf, sizeof(buf), "$BAT:%.2f:%d\n", batVoltage, batPercent); bleSend(String(buf)); }
   }
 
   // --- GPS ---
@@ -1461,6 +1517,12 @@ void loop() {
     tel += String(gps.satellites.value());
     tel += "\n";
     bleSend(tel);
+  }
+
+  // --- Leitura bateria (10s) ---
+  if (millis() - lastBatRead >= BAT_READ_INTERVAL) {
+    lastBatRead = millis();
+    readBattery();
   }
 
   // ========================================================

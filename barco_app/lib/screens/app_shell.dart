@@ -28,10 +28,12 @@ class _AppShellState extends State<AppShell> {
   StreamSubscription? _telSub;
   StreamSubscription? _connSub;
   StreamSubscription? _hmnSub;
+  StreamSubscription? _batSub;
   bool _isConnected = true;
   bool _isReconnecting = false;
   bool _manualDisconnect = false;
   int _pwmHelMin = 0;
+  BatteryInfo? _battery;
   final _otaRunning = ValueNotifier<bool>(false);
 
   static const _tabLabels = ['Controle', 'Mapa', 'Config'];
@@ -44,6 +46,7 @@ class _AppShellState extends State<AppShell> {
     _telSub  = widget.ble.telemetryStream.listen((t) => setState(() => _tel = t));
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
+    _batSub  = widget.ble.batteryStream.listen((b) => setState(() => _battery = b));
     _otaRunning.addListener(() { if (mounted) setState(() {}); });
     if (widget.autoReconnect) {
       _scheduleReconnect();
@@ -129,6 +132,7 @@ class _AppShellState extends State<AppShell> {
     _telSub?.cancel();
     _connSub?.cancel();
     _hmnSub?.cancel();
+    _batSub?.cancel();
     _otaRunning.dispose();
     super.dispose();
   }
@@ -159,6 +163,7 @@ class _AppShellState extends State<AppShell> {
             ),
             centerTitle: true,
             actions: [
+              if (_battery != null) _BatteryWidget(info: _battery!),
               IconButton(
                 icon: Icon(
                   _isConnected ? Icons.wifi : Icons.wifi_off,
@@ -246,6 +251,44 @@ class _AppShellState extends State<AppShell> {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _BatteryWidget extends StatelessWidget {
+  final BatteryInfo info;
+  const _BatteryWidget({required this.info});
+
+  Color _color() {
+    if (info.percent >= 60) return Colors.green.shade400;
+    if (info.percent >= 20) return Colors.orange.shade400;
+    return Colors.red.shade400;
+  }
+
+  IconData _icon() {
+    if (info.percent >= 90) return Icons.battery_full;
+    if (info.percent >= 70) return Icons.battery_6_bar;
+    if (info.percent >= 50) return Icons.battery_4_bar;
+    if (info.percent >= 30) return Icons.battery_3_bar;
+    if (info.percent >= 10) return Icons.battery_1_bar;
+    return Icons.battery_alert;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_icon(), color: _color(), size: 20),
+          const SizedBox(width: 2),
+          Text(
+            '${info.voltage.toStringAsFixed(1)}V',
+            style: TextStyle(color: _color(), fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
     );
   }
 }
