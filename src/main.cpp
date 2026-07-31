@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
-#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.68"
+//#define LOG_ENABLE    // Habilita debug via Serial
+#define FIRMWARE_VERSION "1.1.70"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -180,7 +180,7 @@ const float BAT_CAL         = 1.064f; // calibrado: bateria 15V → divisor 2.61
 float         batVoltage    = 0.0f;
 int           batPercent    = -1;
 unsigned long lastBatRead   = 0;
-const unsigned long BAT_READ_INTERVAL = 10000UL; // 10s
+const unsigned long BAT_READ_INTERVAL = 3000UL; // 10s
 static int  voltToSocPb(float v);
 static void readBattery(bool forceSend = false);
 

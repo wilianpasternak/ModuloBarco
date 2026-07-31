@@ -151,16 +151,9 @@ class _AppShellState extends State<AppShell> {
           backgroundColor: _kDark,
           appBar: AppBar(
             backgroundColor: _kPanel,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset('assets/logo_braga_pesca.png', height: 28),
-                const SizedBox(width: 10),
-                const Text('Pesca Plus',
-                    style: TextStyle(color: _kGold, fontSize: 16,
-                        fontWeight: FontWeight.bold, letterSpacing: 1)),
-              ],
-            ),
+            title: const Text('Pesca Plus',
+                style: TextStyle(color: _kGold, fontSize: 16,
+                    fontWeight: FontWeight.bold, letterSpacing: 1)),
             centerTitle: true,
             actions: [
               if (_battery != null) _BatteryWidget(info: _battery!),
