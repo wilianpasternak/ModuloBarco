@@ -932,8 +932,8 @@ void setup() {
 
   // --- ADC bateria (GPIO34 input-only, 11dB para range 0-3.3V) ---
   analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);
-  // Leitura inicial para ter valores prontos antes da primeira conexao BLE
-  { long s = 0; for (int i = 0; i < 16; i++) { s += analogRead(BAT_ADC_PIN); delay(1); }
+  // Leitura inicial sem delay para nao atrasar setup (nao ha BLE ainda, so atualiza vars)
+  { long s = 0; for (int i = 0; i < 16; i++) s += analogRead(BAT_ADC_PIN);
     float v = (s / 16.0f / 4095.0f) * 3.3f;
     batVoltage = constrain(v * BAT_DIVISOR * BAT_CAL, 0.0f, 20.0f);
     batPercent = voltToSocPb(batVoltage); }
@@ -1150,7 +1150,7 @@ static int voltToSocPb(float v) {
 
 static void readBattery(bool forceSend) {
   long sum = 0;
-  for (int i = 0; i < 16; i++) { sum += analogRead(BAT_ADC_PIN); delay(1); }
+  for (int i = 0; i < 16; i++) sum += analogRead(BAT_ADC_PIN);
   float vAdc = (sum / 16.0f / 4095.0f) * 3.3f;
   float vBat = constrain(vAdc * BAT_DIVISOR * BAT_CAL, 0.0f, 20.0f);
   int   pct  = voltToSocPb(vBat);
