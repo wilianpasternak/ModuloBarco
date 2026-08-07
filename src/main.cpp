@@ -1,6 +1,6 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
-//#define LOG_ENABLE    // Habilita debug via Serial
+#define LOG_ENABLE    // Habilita debug via Serial
 #define FIRMWARE_VERSION "1.1.70"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
@@ -67,7 +67,7 @@ inline void motorWrite(int pin, int val) {
   unsigned long bootTime;
   bool modoCadastro    = true;
   bool modoCadastroBLE = false; // ativado via BLE $RGE, sem timeout de boot
-  const unsigned long cadastroTimeout = 1500;
+  const unsigned long cadastroTimeout = 1000;
   long tempoLigadoGiro   = 0;
   long tempoLigadoUpDown = 0;
 #else
@@ -1053,7 +1053,6 @@ void setup() {
       radio.openReadingPipe(1, address);
       radio.startListening();
       carregarControlesNVS();
-      bootTime = millis();
       #ifdef LOG_ENABLE
         Serial.println(F("  NRF24L01 : OK"));
         Serial.print(F("    isChipConnected : ")); Serial.println(radio.isChipConnected() ? F("sim") : F("NAO"));
@@ -1128,6 +1127,11 @@ void setup() {
         digitalWrite(buz, HIGH); delay(80); digitalWrite(buz, LOW); delay (200);
       }
     }
+  #endif
+
+  // Janela de cadastro NRF: 1s após todos os sensores inicializados
+  #ifdef USE_NRF
+    bootTime = millis();
   #endif
 }
 
