@@ -1280,15 +1280,16 @@ void loop() {
           if (remoteRegistered) bleSend(buildRemMsg());
         }
       };
-      if      (text[0]=='1'){ salvarControle(0,controlID); _finalizarCadastro(true);  delay(2000); return; }
-      else if (text[1]=='1'){ salvarControle(1,controlID); _finalizarCadastro(true);  delay(2000); return; }
-      else if (text[2]=='1'){ salvarControle(2,controlID); _finalizarCadastro(true);  delay(2000); return; }
-      else if (text[3]=='1'){ salvarControle(3,controlID); _finalizarCadastro(true);  delay(2000); return; }
-      else if (text[4]=='1'){ salvarControle(4,controlID); _finalizarCadastro(true);  delay(2000); return; }
-      else if (text[5]=='1' && text[6]=='1'){ calibrarBussola(); _finalizarCadastro(false); delay(2000); return; }
-      else if (text[7]=='1'){
-        apontaNorteMode=true; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
-        _finalizarCadastro(false); delay(2000); return;
+      // Funcoes especiais (prioridade sobre cadastro)
+      if (text[5]=='1' && text[6]=='1'){ calibrarBussola(); _finalizarCadastro(false); delay(2000); return; }
+      if (text[7]=='1'){ apontaNorteMode=true; giroIntegral=0; lastGiroError=0; lastGiroTime=millis(); _finalizarCadastro(false); delay(2000); return; }
+      // Qualquer botao pressionado: cadastra no primeiro slot livre
+      bool _algumBotao = false;
+      for (int _b = 0; _b < 8; _b++) if (text[_b]=='1') { _algumBotao = true; break; }
+      if (_algumBotao) {
+        int _slot = 0;
+        for (int _s = 0; _s < MAX_CONTROLES; _s++) if (controlesMem[_s] == 0) { _slot = _s; break; }
+        salvarControle(_slot, controlID); _finalizarCadastro(true); delay(2000); return;
       }
       return;
     }
