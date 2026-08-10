@@ -151,7 +151,7 @@ class _AppShellState extends State<AppShell> {
           backgroundColor: _kDark,
           appBar: AppBar(
             backgroundColor: _kPanel,
-            title: const Text('Pesca Plus',
+            title: const Text('Rodrigo Filetti',
                 style: TextStyle(color: _kGold, fontSize: 16,
                     fontWeight: FontWeight.bold, letterSpacing: 1)),
             centerTitle: true,
