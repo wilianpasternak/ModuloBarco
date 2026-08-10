@@ -1021,6 +1021,7 @@ void setup() {
   ledcSetup(LEDC_CH_RIGHT, 5000, 8); ledcAttachPin(right,      LEDC_CH_RIGHT);
   ledcSetup(LEDC_CH_ACEL,  5000, 8); ledcAttachPin(acelerador, LEDC_CH_ACEL);
 
+  /*
   #ifdef LOG_ENABLE
     Serial.println(F("  I2C scan:"));
     for (uint8_t addr = 1; addr < 127; addr++) {
@@ -1032,7 +1033,7 @@ void setup() {
       }
     }
   #endif
-
+*/
   // --- NRF24L01 ---
   #ifdef USE_NRF
     #ifdef LOG_ENABLE
@@ -1048,7 +1049,7 @@ void setup() {
      // radio.setChannel(76);          // canal RF — deve ser igual ao do transmissor
       radio.setDataRate(RF24_250KBPS);
       radio.setPALevel(RF24_PA_MAX);
-      //radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
+      radio.setPayloadSize(18);      // tamanho fixo do pacote do controle
       // Pipe 0 é reservado para TX/ACK — usar pipe 1 para recepção
       radio.openReadingPipe(1, address);
       radio.startListening();
