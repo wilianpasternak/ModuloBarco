@@ -425,6 +425,7 @@ void ativarAncora() {
                && gps.location.age() < 2000
                && (lat != 0.0 || lon != 0.0);
   if (gpsOk) {
+    northMode       = false;
     anchorMode      = true;
     anchorLat       = lat;
     anchorLon       = lon;
@@ -508,6 +509,18 @@ void desativarAncora() {
   #endif
 }
 
+// ================= DESATIVAR NORTE =================
+void desativarNorte() {
+  northMode    = false;
+  giroIntegral = 0; lastGiroError = 0;
+  headIntegral = 0; lastHeadError = 0;
+  if (motorLigado) motorWrite(acelerador, 0);
+  motorWrite(left, 0); motorWrite(right, 0);
+  #ifdef USE_BUZZER
+    if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(300); digitalWrite(buz, LOW); }
+  #endif
+}
+
 // ================= REM: helper =================
 #ifdef USE_NRF
 String buildRemMsg() {
@@ -561,6 +574,7 @@ void processBlecmd(const String& cmd) {
   }
   // --- Motor ON/OFF ---
   else if (cmd == "$MOT") {
+    if (anchorMode) { desativarAncora(); return; }
     motorLigado = !motorLigado;
     if (motorLigado) {
       if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
@@ -578,6 +592,7 @@ void processBlecmd(const String& cmd) {
   }
   // --- Aceleracao ---
   else if (cmd == "$ACE+") {
+    if (anchorMode) { desativarAncora(); return; }
     aceleracao = constrain(aceleracao + 5, 0, 255);
     if (motorLigado) {
       if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
@@ -591,6 +606,7 @@ void processBlecmd(const String& cmd) {
   #endif
   }
   else if (cmd == "$ACE-") {
+    if (anchorMode) { desativarAncora(); return; }
     int minAcel = motorLigado ? pwmHeliceMin : 0;
     aceleracao = constrain(aceleracao - 5, minAcel, 255);
     if (motorLigado) motorWrite(acelerador, aceleracao);
@@ -603,7 +619,9 @@ void processBlecmd(const String& cmd) {
   }
   // --- Giro direita ---
   else if (cmd == "$GTR+") {
-    if (!anchorMode) {
+    if (anchorMode) { desativarAncora(); return; }
+    if (northMode)  { desativarNorte();  return; }
+    {
       giroDir = true; giroEsq = false;
       motorWrite(right, usoPwmGiro); motorWrite(left, 0);
       lastGiroCmdTime = millis();
@@ -621,7 +639,9 @@ void processBlecmd(const String& cmd) {
   }
   // --- Giro esquerda ---
   else if (cmd == "$GTL+") {
-    if (!anchorMode) {
+    if (anchorMode) { desativarAncora(); return; }
+    if (northMode)  { desativarNorte();  return; }
+    {
       giroEsq = true; giroDir = false;
       motorWrite(left, usoPwmGiro); motorWrite(right, 0);
       lastGiroCmdTime = millis();
@@ -639,6 +659,8 @@ void processBlecmd(const String& cmd) {
   }
   // --- Subir ---
   else if (cmd == "$UPP+") {
+    if (anchorMode) { desativarAncora(); return; }
+    if (northMode)  { desativarNorte();  return; }
     upAtivo = true; downAtivo = false;
     digitalWrite(pinUp, LOW); digitalWrite(pinDown, HIGH);
     lastUpDownCmdTime = millis();
@@ -649,6 +671,8 @@ void processBlecmd(const String& cmd) {
   }
   // --- Descer ---
   else if (cmd == "$DWN+") {
+    if (anchorMode) { desativarAncora(); return; }
+    if (northMode)  { desativarNorte();  return; }
     downAtivo = true; upAtivo = false;
     digitalWrite(pinDown, LOW); digitalWrite(pinUp, HIGH);
     lastUpDownCmdTime = millis();
@@ -1319,27 +1343,20 @@ void loop() {
       if (buzzerEnabled) beep(1);  // 10ms — confirmacao de recebimento
     #endif
 
-    if (cmd[7]=='1' && !northMode) {
-      if (!anchorMode) ativarAncora(); else desativarAncora();
-      delay(300); return;
-    }
-    if (cmd[8]=='1' && !anchorMode) {
-      northMode = !northMode; anchorMode = false;
-      if (northMode) {
-        northHeadingTarget=heading; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
-        #ifdef USE_BUZZER
-          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(150); digitalWrite(buz,LOW); }
-        #endif
-      } else {
-        giroIntegral=0; lastGiroError=0; headIntegral=0; lastHeadError=0;
-        if (motorLigado) motorWrite(acelerador,0);
-        #ifdef USE_BUZZER
-          if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(1500); digitalWrite(buz,LOW); }
-        #endif
+    // ANCORA ATIVA: qualquer botao desativa
+    if (anchorMode) {
+      for (int _b = 0; _b < 9; _b++) {
+        if (cmd[_b]=='1') { desativarAncora(); delay(300); break; }
       }
-      delay(300); return;
+      return;
     }
+
+    // NORTE ATIVO: motor/accel funcionam; giro/up/down/ancora/norte desativam
     if (northMode) {
+      if (cmd[7]=='1') { ativarAncora(); delay(300); return; }
+      if (cmd[8]=='1' || cmd[1]=='1' || cmd[2]=='1' || cmd[5]=='1' || cmd[6]=='1') {
+        desativarNorte(); delay(300); return;
+      }
       if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
       if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; if(motorLigado) motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
       if (cmd[0]=='1'){
@@ -1347,22 +1364,32 @@ void loop() {
         if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
         else { motorWrite(acelerador, pwmMotorOff); }
       }
+      return;
     }
-    if (!anchorMode && !northMode) {
-      if (cmd[0]=='1'){
-        motorLigado=!motorLigado;
-        if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
-        else { motorWrite(acelerador, pwmMotorOff); }
-      }
-      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
-      if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
-      if (cmd[1]=='1'){ motorWrite(left,usoPwmGiro); motorWrite(right,0); tempoLigadoGiro=millis(); }
-      else if (cmd[2]=='1'){ motorWrite(right,usoPwmGiro); motorWrite(left,0); tempoLigadoGiro=millis(); }
-      else if (!giroDir && !giroEsq && !calibrando){ motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis(); }
-      if (cmd[5]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
-      else if (cmd[6]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
-      else if (!upAtivo && !downAtivo){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
+
+    // MODO NORMAL
+    if (cmd[7]=='1') { ativarAncora(); delay(300); return; }
+    if (cmd[8]=='1') {
+      northMode = true;
+      northHeadingTarget=heading; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
+      #ifdef USE_BUZZER
+        if (buzzerEnabled) { digitalWrite(buz,HIGH); delay(150); digitalWrite(buz,LOW); }
+      #endif
+      delay(300); return;
     }
+    if (cmd[0]=='1'){
+      motorLigado=!motorLigado;
+      if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
+      else { motorWrite(acelerador, pwmMotorOff); }
+    }
+    if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
+    if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+    if (cmd[1]=='1'){ motorWrite(left,usoPwmGiro); motorWrite(right,0); tempoLigadoGiro=millis(); }
+    else if (cmd[2]=='1'){ motorWrite(right,usoPwmGiro); motorWrite(left,0); tempoLigadoGiro=millis(); }
+    else if (!giroDir && !giroEsq && !calibrando){ motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis(); }
+    if (cmd[5]=='1'){ digitalWrite(pinUp,LOW); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
+    else if (cmd[6]=='1'){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,LOW); tempoLigadoUpDown=millis(); }
+    else if (!upAtivo && !downAtivo){ digitalWrite(pinUp,HIGH); digitalWrite(pinDown,HIGH); tempoLigadoUpDown=millis(); }
   }
 
   // Timeouts hold NRF — só agem se BLE nao estiver controlando o mesmo atuador
