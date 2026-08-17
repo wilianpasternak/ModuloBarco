@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 #define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.71"
+#define FIRMWARE_VERSION "1.1.79"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -15,7 +15,7 @@
 #ifdef USE_NRF
   #include <SPI.h>
   #include <nRF24L01.h>
-  #include <RF24.h>          
+  #include <RF24.h>
 #endif
 
 // ================= BLE UUIDs =================
@@ -27,14 +27,14 @@
 const int left       = 2;    // PWM giro esquerda  (LEDC)
 const int right      = 4;    // PWM giro direita   (LEDC)
 const int acelerador = 33;   // PWM helice         (LEDC)
-const int pinUp      = 32;   // Subir  (relé: LOW=ativo, HIGH=desligado)
+const int pinUp      = 32;   // Subir  (relé: LOW=ativo, HIGH=desligado) 
 const int pinDown    = 13;   // Descer (relé: LOW=ativo, HIGH=desligado)
 #define GPS_RX_PIN   16
 #define GPS_TX_PIN   17
 #define I2C_SDA_PIN  21
 #define I2C_SCL_PIN  22
 #ifdef USE_BUZZER
-  const int buz = 27;        // Buzzer placeholder — ajuste o pino conforme hardware
+  const int buz = 25;        // Buzzer placeholder — ajuste o pino conforme hardware
 #endif
 
 #ifdef USE_NRF
@@ -42,7 +42,7 @@ const int pinDown    = 13;   // Descer (relé: LOW=ativo, HIGH=desligado)
   #define NRF_CSN_PIN  5    // CSN / SS
   #define NRF_SCK_PIN  18    // VSPI SCK
   #define NRF_MISO_PIN 19    // VSPI MISO
-  #define NRF_MOSI_PIN 23    // VSPI MOSI
+  #define NRF_MOSI_PIN 23    // VSPI MOSI 
 #endif
 
 // ================= LEDC (ESP32 v2.x) =================
@@ -176,7 +176,7 @@ String        bleCmdBuffer      = "";
 #define BAT_ADC_PIN  34
 // Divisor R1=47kΩ R2=10kΩ → V_bat = V_adc * (47+10)/10
 const float BAT_DIVISOR     = 5.7f;
-const float BAT_CAL         = 1.064f; // calibrado: bateria 15V → divisor 2.614V → ADC lia 14.1V
+const float BAT_CAL         = 1.074f; // calibrado: bateria 15V → divisor 2.614V → ADC lia 14.1V
 float         batVoltage    = 0.0f;
 int           batPercent    = -1;
 unsigned long lastBatRead   = 0;
@@ -1353,8 +1353,8 @@ void loop() {
 
     // NORTE ATIVO: motor/accel funcionam; giro/up/down/ancora/norte desativam
     if (northMode) {
-      if (cmd[7]=='1') { ativarAncora(); delay(300); return; }
-      if (cmd[8]=='1' || cmd[1]=='1' || cmd[2]=='1' || cmd[5]=='1' || cmd[6]=='1') {
+      if (cmd[8]=='1') { ativarAncora(); delay(300); return; }
+      if (cmd[7]=='1' || cmd[1]=='1' || cmd[2]=='1' || cmd[5]=='1' || cmd[6]=='1') {
         desativarNorte(); delay(300); return;
       }
       if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
@@ -1368,8 +1368,8 @@ void loop() {
     }
 
     // MODO NORMAL
-    if (cmd[7]=='1') { ativarAncora(); delay(300); return; }
-    if (cmd[8]=='1') {
+    if (cmd[8]=='1') { ativarAncora(); delay(300); return; }
+    if (cmd[7]=='1') {
       northMode = true;
       northHeadingTarget=heading; giroIntegral=0; lastGiroError=0; lastGiroTime=millis();
       #ifdef USE_BUZZER

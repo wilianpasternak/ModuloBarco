@@ -32,7 +32,7 @@ class AdvancedConfig {
 const _serviceUuid        = '0000ffe0-0000-1000-8000-00805f9b34fb';
 const _characteristicUuid = '0000ffe1-0000-1000-8000-00805f9b34fb';
 const _otaCharUuid        = '0000ffe2-0000-1000-8000-00805f9b34fb';
-const _githubReleasesApi  = 'https://api.github.com/repos/wilianpasternak/ModuloBarco/releases';
+const _githubReleasesApi  = 'https://api.github.com/repos/wilianpasternak/ModuloBarco/releases/latest';
 const _savedDeviceKey     = 'saved_device_id';
 
 class BleService {
@@ -278,22 +278,23 @@ class BleService {
   Future<Map<String, dynamic>?> checkForUpdate() async {
     try {
       final resp = await http.get(Uri.parse(_githubReleasesApi),
-          headers: {'Accept': 'application/vnd.github.v3+json'});
+          headers: {'Accept': 'application/vnd.github.v3+json'})
+          .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return null;
-      final releases = jsonDecode(resp.body) as List<dynamic>;
-      // Percorre releases mais recentes primeiro; ignora releases do app (app-v*)
-      for (final release in releases) {
-        final tag = (release['tag_name'] as String? ?? '');
-        if (!tag.startsWith('v') || tag.startsWith('app-')) continue;
-        final assets = release['assets'] as List<dynamic>? ?? [];
-        for (final asset in assets) {
-          final url = asset['browser_download_url'] as String? ?? '';
-          if (url.endsWith('.bin')) {
-            return {
-              'version': tag.replaceFirst('v', ''),
-              'url': url,
-            };
-          }
+      final release = jsonDecode(resp.body) as Map<String, dynamic>;
+      final tag = (release['tag_name'] as String? ?? '');
+      // Ignora releases do app (app-v*); aceita apenas firmware (v*)
+      if (!tag.startsWith('v') || tag.startsWith('app-')) {
+        return {'version': null, 'url': null};
+      }
+      final assets = release['assets'] as List<dynamic>? ?? [];
+      for (final asset in assets) {
+        final url = asset['browser_download_url'] as String? ?? '';
+        if (url.endsWith('.bin')) {
+          return {
+            'version': tag.replaceFirst('v', ''),
+            'url': url,
+          };
         }
       }
       return {'version': null, 'url': null};
