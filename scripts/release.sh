@@ -23,6 +23,12 @@ fi
 
 echo "==> Versão do firmware: v$VERSION"
 
+# Verifica mudanças não comitadas (ignora firmware_latest.json — atualizado pelo script)
+if ! git diff --quiet -- ':!firmware_latest.json' || ! git diff --staged --quiet -- ':!firmware_latest.json'; then
+  echo "ERRO: Há mudanças não comitadas. Faça commit e push antes de publicar."
+  exit 1
+fi
+
 # Verifica se a release já existe
 if "$GH" release view "v$VERSION" &>/dev/null; then
   echo "AVISO: Release v$VERSION já existe no GitHub."
@@ -58,6 +64,17 @@ No app Braga Pesca: **Config → Verificar atualização → Atualizar**
 ### Instalação manual
 Use o PlatformIO ou esptool para gravar o \`firmware.bin\` diretamente."
 
+# Atualiza manifest de firmware (usado pelo app para OTA check)
+MANIFEST="firmware_latest.json"
+cat > "$MANIFEST" <<JSON
+{
+  "version": "$VERSION",
+  "url": "https://github.com/wilianpasternak/ModuloBarco/releases/download/v$VERSION/firmware.bin"
+}
+JSON
+git add "$MANIFEST"
+git commit -m "chore(fw): atualizar firmware_latest.json para v$VERSION"
+git push origin main
 echo ""
 echo "==> Release v$VERSION publicada com sucesso!"
 echo "    https://github.com/wilianpasternak/ModuloBarco/releases/tag/v$VERSION"
