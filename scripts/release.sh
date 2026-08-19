@@ -23,12 +23,6 @@ fi
 
 echo "==> Versão do firmware: v$VERSION"
 
-# Verifica mudanças não comitadas (ignora firmware_latest.json — atualizado pelo script)
-if ! git diff --quiet -- ':!firmware_latest.json' || ! git diff --staged --quiet -- ':!firmware_latest.json'; then
-  echo "ERRO: Há mudanças não comitadas. Faça commit e push antes de publicar."
-  exit 1
-fi
-
 # Verifica se a release já existe
 if "$GH" release view "v$VERSION" &>/dev/null; then
   echo "AVISO: Release v$VERSION já existe no GitHub."
@@ -72,8 +66,8 @@ cat > "$MANIFEST" <<JSON
   "url": "https://github.com/wilianpasternak/ModuloBarco/releases/download/v$VERSION/firmware.bin"
 }
 JSON
-git add "$MANIFEST"
-git commit -m "chore(fw): atualizar firmware_latest.json para v$VERSION"
+git add "$MANIFEST" src/main.cpp
+git commit -m "chore(fw): release v$VERSION"
 git push origin main
 echo ""
 echo "==> Release v$VERSION publicada com sucesso!"
