@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 //#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.80"
+#define FIRMWARE_VERSION "1.1.81"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -34,7 +34,7 @@ const int pinDown    = 13;   // Descer (relé: LOW=ativo, HIGH=desligado)
 #define I2C_SDA_PIN  21
 #define I2C_SCL_PIN  22
 #ifdef USE_BUZZER
-  const int buz = 25;        // Buzzer placeholder — ajuste o pino conforme hardware
+  const int buz = 27;        // Buzzer placeholder — ajuste o pino conforme hardware
 #endif
 
 #ifdef USE_NRF
