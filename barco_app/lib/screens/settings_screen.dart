@@ -32,6 +32,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _sliderCalibPwm  = 64.0;  // (160-100)/100*90+10
   double _sliderUsoPwm    = 91.3;  // (240-100)/155*90+10
 
+  // Incremento de aceleração (fora da senha)
+  double _aceleracaoIncremento = 5.0;
+
   StreamSubscription? _hmnSub;
   StreamSubscription? _buzzerSub;
   StreamSubscription? _remotesSub;
@@ -60,10 +63,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hofSub     = widget.ble.headingOffsetStream.listen((v) => setState(() => _headingOffset = v));
     _regModeSub = widget.ble.remoteRegModeStream.listen((v) => setState(() => _registerMode = v));
     _advCfgSub  = widget.ble.advancedConfigStream.listen((cfg) => setState(() {
-      _calibTimeSeg   = cfg.calibTimeSeg;
-      _sliderCalibPwm = _pwmToCalibPct(cfg.calibPwmGiro);
-      _sliderUsoPwm   = _pwmToUsoPct(cfg.usoPwmGiro);
+      _calibTimeSeg         = cfg.calibTimeSeg;
+      _sliderCalibPwm       = _pwmToCalibPct(cfg.calibPwmGiro);
+      _sliderUsoPwm         = _pwmToUsoPct(cfg.usoPwmGiro);
+      _aceleracaoIncremento = cfg.aceleracaoIncremento.toDouble();
     }));
+    widget.ble.sendRequestAdvancedConfig();
   }
 
   @override
@@ -875,6 +880,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   valueColor: const AlwaysStoppedAnimation<Color>(_kGold),
                   borderRadius: BorderRadius.circular(4),
                   minHeight: 6,
+                ),
+
+                const SizedBox(height: 20),
+                Divider(color: _kGoldDim.withValues(alpha: 0.3), height: 1),
+                const SizedBox(height: 16),
+
+                const Text('Incremento de Aceleração',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Quanto o acelerador sobe ou desce a cada clique, pelo app ou pelo controle remoto.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  const Text('2',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  Expanded(
+                    child: Slider(
+                      value: _aceleracaoIncremento.clamp(2.0, 20.0),
+                      min: 2, max: 20,
+                      divisions: 18,
+                      activeColor: _kGold,
+                      inactiveColor: _kGoldDim.withValues(alpha: 0.3),
+                      label: '${_aceleracaoIncremento.round()}',
+                      onChanged: (v) => setState(() => _aceleracaoIncremento = v),
+                      onChangeEnd: (v) =>
+                          widget.ble.sendAceleracaoIncremento(v.round()),
+                    ),
+                  ),
+                  const Text('20',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                ]),
+                Center(
+                  child: Text('${_aceleracaoIncremento.round()}',
+                      style: const TextStyle(
+                          color: _kGold, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),

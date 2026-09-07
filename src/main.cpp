@@ -1,7 +1,7 @@
 // ================= DEFINES =================
 #define USE_NRF     // Descomente para ativar radio NRF24L01
 //#define LOG_ENABLE    // Habilita debug via Serial
-#define FIRMWARE_VERSION "1.1.82"
+#define FIRMWARE_VERSION "1.1.83"
 #define USE_BUZZER  // Descomente para ativar buzzer fisico
 
 // ================= LIBS =================
@@ -38,7 +38,7 @@ const int pinDown    = 13;   // Descer (relé: LOW=ativo, HIGH=desligado)
 #endif
 
 #ifdef USE_NRF
-  #define NRF_CE_PIN   14    // CE
+  #define NRF_CE_PIN   14   // CE
   #define NRF_CSN_PIN  5    // CSN / SS
   #define NRF_SCK_PIN  18    // VSPI SCK
   #define NRF_MISO_PIN 19    // VSPI MISO
@@ -148,6 +148,7 @@ double Kp_giro = 3.0, Ki_giro = 0.1, Kd_giro = 0.0;
 double giroIntegral = 0, lastGiroError = 0;
 const int    pwmGiroMin  = 150;
 int          usoPwmGiro  = 240;   // max PWM giro uso manual; NVS "usoPwmGiro"; default 240
+int          aceleracaoIncremento = 5;  // passo do acelerador por clique (app/NRF); NVS "aceInc"; default 5
 const double zonaForte   = 220.0;
 const int    pwmFinoMax  = 150;
 const int    pwmForteMin = 220;
@@ -158,6 +159,14 @@ unsigned long lastGiroTime = 0;
 // ================= CONTROLE =================
 int           aceleracao  = 0;
 unsigned long lastGPSTime = 0;
+
+// ================= RAMPA MOTOR (religamento manual) =================
+// Ao religar o motor em modo manual (remoto NRF ou app), sobe de 0 ate
+// o pwm de "aceleracao" em motorRampDuracao ms, evitando pico de corrente.
+bool                motorRampAtiva  = false;
+unsigned long       motorRampStart  = 0;
+int                 motorRampAlvo   = 0;
+const unsigned long motorRampDuracao = 1500;
 
 // ================= HOLD BLE =================
 bool          giroDir   = false;
@@ -289,6 +298,11 @@ void calibrarBussola() {
     if (buzzerEnabled) digitalWrite(buz, HIGH);
   #endif
   long t0 = millis();
+  
+  #ifdef USE_BUZZER
+    if (buzzerEnabled) { digitalWrite(buz, LOW); delay(1000); digitalWrite(buz, HIGH); }
+  #endif
+
   motorWrite(left, calibPwmGiro); motorWrite(right, 0);
   while (millis() - t0 < (unsigned long)calibTimeSeg * 1000) {
     #ifdef USE_NRF
@@ -409,6 +423,21 @@ void pararUpDown() {
   digitalWrite(pinUp, HIGH); digitalWrite(pinDown, HIGH);
 }
 
+// ================= HELPERS MOTOR (rampa manual) =================
+void ligarMotor() {
+  motorLigado = true;
+  if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
+  motorRampAlvo  = aceleracao;
+  motorRampStart = millis();
+  motorRampAtiva = true;
+}
+
+void desligarMotor() {
+  motorLigado    = false;
+  motorRampAtiva = false;
+  motorWrite(acelerador, pwmMotorOff);
+}
+
 // ================= HELPER BLE SEND =================
 void bleSend(const String& s) {
   if (bleConnected && pBleChar) {
@@ -435,6 +464,7 @@ void ativarAncora() {
     pwmFiltered     = 0;
     pwmComHeading   = 0;
     pwmRampAtual    = 0;
+    motorRampAtiva  = false;
     giroIntegral    = 0;
     lastGiroError   = 0;
     lastGiroTime    = millis();
@@ -493,6 +523,7 @@ void desativarAncora() {
   pwmFiltered     = 0;
   pwmComHeading   = 0;
   pwmRampAtual    = 0;
+  motorRampAtiva  = false;
   giroIntegral    = 0;
   lastGiroError   = 0;
   bearingReady    = false;
@@ -514,6 +545,7 @@ void desativarNorte() {
   northMode    = false;
   giroIntegral = 0; lastGiroError = 0;
   headIntegral = 0; lastHeadError = 0;
+  motorRampAtiva = false;
   if (motorLigado) motorWrite(acelerador, 0);
   motorWrite(left, 0); motorWrite(right, 0);
   #ifdef USE_BUZZER
@@ -542,7 +574,7 @@ String buildRemMsg() {
 #endif
 
 String buildAdvCfgMsg() {
-  return "$ACG:" + String(calibTimeSeg) + ":" + String(calibPwmGiro) + ":" + String(usoPwmGiro) + "\n";
+  return "$ACG:" + String(calibTimeSeg) + ":" + String(calibPwmGiro) + ":" + String(usoPwmGiro) + ":" + String(aceleracaoIncremento) + "\n";
 }
 
 // ================= PROCESSAMENTO DE COMANDOS BLE =================
@@ -566,6 +598,7 @@ void processBlecmd(const String& cmd) {
       #endif
     } else {
       giroIntegral = 0; lastGiroError = 0; headIntegral = 0; lastHeadError = 0;
+      motorRampAtiva = false;
       if (motorLigado) motorWrite(acelerador, 0);
       #ifdef USE_BUZZER
         if (buzzerEnabled) { digitalWrite(buz, HIGH); delay(1500); digitalWrite(buz, LOW); }
@@ -575,13 +608,8 @@ void processBlecmd(const String& cmd) {
   // --- Motor ON/OFF ---
   else if (cmd == "$MOT") {
     if (anchorMode) { desativarAncora(); return; }
-    motorLigado = !motorLigado;
-    if (motorLigado) {
-      if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
-      motorWrite(acelerador, aceleracao);
-    } else {
-      motorWrite(acelerador, pwmMotorOff);
-    }
+    if (motorLigado) desligarMotor();
+    else             ligarMotor();
     #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
       digitalWrite(buz, LOW);
@@ -593,9 +621,10 @@ void processBlecmd(const String& cmd) {
   // --- Aceleracao ---
   else if (cmd == "$ACE+") {
     if (anchorMode) { desativarAncora(); return; }
-    aceleracao = constrain(aceleracao + 5, 0, 255);
+    aceleracao = constrain(aceleracao + aceleracaoIncremento, 0, 255);
     if (motorLigado) {
       if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin;
+      motorRampAtiva = false;
       motorWrite(acelerador, aceleracao);
     }
     #ifdef USE_BUZZER
@@ -608,8 +637,8 @@ void processBlecmd(const String& cmd) {
   else if (cmd == "$ACE-") {
     if (anchorMode) { desativarAncora(); return; }
     int minAcel = motorLigado ? pwmHeliceMin : 0;
-    aceleracao = constrain(aceleracao - 5, minAcel, 255);
-    if (motorLigado) motorWrite(acelerador, aceleracao);
+    aceleracao = constrain(aceleracao - aceleracaoIncremento, minAcel, 255);
+    if (motorLigado) { motorRampAtiva = false; motorWrite(acelerador, aceleracao); }
     #ifdef USE_BUZZER
     if (buzzerAtivo && (millis() - buzzerLast) > 10) {
       digitalWrite(buz, LOW);
@@ -798,6 +827,11 @@ void processBlecmd(const String& cmd) {
     prefs.begin("barco", false); prefs.putInt("usoPwmGiro", usoPwmGiro); prefs.end();
     bleSend(buildAdvCfgMsg());
   }
+  else if (cmd.startsWith("$INC:")) {
+    aceleracaoIncremento = constrain(cmd.substring(5).toInt(), 2, 20);
+    prefs.begin("barco", false); prefs.putInt("aceInc", aceleracaoIncremento); prefs.end();
+    bleSend(buildAdvCfgMsg());
+  }
   // --- Aponta Norte: gira para 0° com PWM 120 e histerese 5° (calibracao bussola) ---
   else if (cmd == "$APN") {
     apontaNorteMode = true;
@@ -949,6 +983,7 @@ void setup() {
   calibTimeSeg  = prefs.getInt("calibTimeSeg", 10);
   calibPwmGiro  = prefs.getInt("calibPwmGiro", 160);
   usoPwmGiro    = prefs.getInt("usoPwmGiro",   240);
+  aceleracaoIncremento = prefs.getInt("aceInc", 5);
   #ifdef USE_BUZZER
     buzzerEnabled = prefs.getBool("buzzerOn", true);
   #endif
@@ -1357,12 +1392,11 @@ void loop() {
       if (cmd[7]=='1' || cmd[1]=='1' || cmd[2]=='1' || cmd[5]=='1' || cmd[6]=='1') {
         desativarNorte(); delay(300); return;
       }
-      if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
-      if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; if(motorLigado) motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+      if (cmd[3]=='1' && aceleracao<255){ aceleracao=min(aceleracao+aceleracaoIncremento, 255); if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorRampAtiva=false; motorWrite(acelerador, aceleracao); }
+      if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao=max(aceleracao-aceleracaoIncremento, pwmHeliceMin); if(motorLigado) { motorRampAtiva=false; motorWrite(acelerador, aceleracao); } }
       if (cmd[0]=='1'){
-        motorLigado=!motorLigado;
-        if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
-        else { motorWrite(acelerador, pwmMotorOff); }
+        if (motorLigado) desligarMotor();
+        else             ligarMotor();
       }
       return;
     }
@@ -1378,12 +1412,11 @@ void loop() {
       delay(300); return;
     }
     if (cmd[0]=='1'){
-      motorLigado=!motorLigado;
-      if (motorLigado) { if (aceleracao < pwmHeliceMin) aceleracao = pwmHeliceMin; motorWrite(acelerador, aceleracao); }
-      else { motorWrite(acelerador, pwmMotorOff); }
+      if (motorLigado) desligarMotor();
+      else             ligarMotor();
     }
-    if (cmd[3]=='1' && aceleracao<255){ aceleracao+=3; if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorWrite(acelerador, aceleracao); }
-    if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao-=3; motorLigado=true; motorWrite(acelerador, max(aceleracao, pwmHeliceMin)); }
+    if (cmd[3]=='1' && aceleracao<255){ aceleracao=min(aceleracao+aceleracaoIncremento, 255); if(aceleracao<pwmHeliceMin) aceleracao=pwmHeliceMin; motorLigado=true; motorRampAtiva=false; motorWrite(acelerador, aceleracao); }
+    if (cmd[4]=='1' && aceleracao>pwmHeliceMin){ aceleracao=max(aceleracao-aceleracaoIncremento, pwmHeliceMin); motorLigado=true; motorRampAtiva=false; motorWrite(acelerador, aceleracao); }
     if (cmd[1]=='1'){ motorWrite(left,usoPwmGiro); motorWrite(right,0); tempoLigadoGiro=millis(); }
     else if (cmd[2]=='1'){ motorWrite(right,usoPwmGiro); motorWrite(left,0); tempoLigadoGiro=millis(); }
     else if (!giroDir && !giroEsq && !calibrando){ motorWrite(left,0); motorWrite(right,0); tempoLigadoGiro=millis(); }
@@ -1422,6 +1455,26 @@ void loop() {
     }
   #endif
   #endif // USE_NRF
+
+  // ========================================================
+  //         RAMPA DE ACELERACAO — religamento manual do motor
+  //         0 -> aceleracao atual em motorRampDuracao ms
+  //         (evita pico de corrente ao sair do motor desligado)
+  // ========================================================
+  if (motorRampAtiva) {
+    if (anchorMode) {
+      motorRampAtiva = false;  // ancora assume o controle do acelerador
+    } else {
+      unsigned long rampElapsed = millis() - motorRampStart;
+      if (rampElapsed >= motorRampDuracao) {
+        motorWrite(acelerador, motorRampAlvo);
+        motorRampAtiva = false;
+      } else {
+        int pwmRamp = (int)((long)motorRampAlvo * (long)rampElapsed / (long)motorRampDuracao);
+        motorWrite(acelerador, pwmRamp);
+      }
+    }
+  }
 
   // ========================================================
   //         TIMEOUTS BLE HOLD — seguranca

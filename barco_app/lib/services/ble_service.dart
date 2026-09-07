@@ -22,10 +22,12 @@ class AdvancedConfig {
   final int calibTimeSeg;
   final int calibPwmGiro;
   final int usoPwmGiro;
+  final int aceleracaoIncremento;
   const AdvancedConfig({
     required this.calibTimeSeg,
     required this.calibPwmGiro,
     required this.usoPwmGiro,
+    required this.aceleracaoIncremento,
   });
 }
 
@@ -119,6 +121,8 @@ class BleService {
     // Solicita valores de configuração (HMN, VER) — firmware responde com $HMN:XX e $VER:XX
     // Delay necessário: firmware pode ainda não ter processado o evento de conexão
     Future.delayed(const Duration(milliseconds: 700), () => sendCommand('\$CFG?'));
+    // Solicita config avancada (inclui incremento de aceleracao, exibido fora da senha)
+    Future.delayed(const Duration(milliseconds: 800), () => sendCommand('\$ACG?'));
 
     device.connectionState.listen((state) {
       if (state == BluetoothConnectionState.disconnected) {
@@ -159,6 +163,7 @@ class BleService {
             calibTimeSeg: int.tryParse(parts[0]) ?? 10,
             calibPwmGiro: int.tryParse(parts[1]) ?? 160,
             usoPwmGiro:   int.tryParse(parts[2]) ?? 240,
+            aceleracaoIncremento: parts.length >= 4 ? (int.tryParse(parts[3]) ?? 5) : 5,
           );
           _advancedConfigController.add(cfg);
         }
@@ -243,6 +248,7 @@ class BleService {
   Future<void> sendCalibTimeSeg(int seconds)  => sendCommand('\$CAT:$seconds');
   Future<void> sendCalibPwmGiro(int pwm)      => sendCommand('\$CAP:$pwm');
   Future<void> sendUsoPwmGiro(int pwm)        => sendCommand('\$GUP:$pwm');
+  Future<void> sendAceleracaoIncremento(int valor) => sendCommand('\$INC:$valor');
 
   // --- Offset de heading da âncora ---
   Future<void> sendHeadingOffset(int deg) => sendCommand('\$HOF:$deg');
