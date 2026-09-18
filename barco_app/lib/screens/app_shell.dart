@@ -5,6 +5,7 @@ import '../services/ble_service.dart';
 import '../models/telemetry.dart';
 import 'remote_screen.dart';
 import 'map_screen.dart';
+import 'community_screen.dart';
 import 'settings_screen.dart';
 import 'scan_screen.dart';
 
@@ -36,8 +37,8 @@ class _AppShellState extends State<AppShell> {
   BatteryInfo? _battery;
   final _otaRunning = ValueNotifier<bool>(false);
 
-  static const _tabLabels = ['Controle', 'Mapa', 'Config'];
-  static const _tabIcons  = [Icons.sports_esports, Icons.map, Icons.settings];
+  static const _tabLabels = ['Controle', 'Mapa', 'Comunidade', 'Config'];
+  static const _tabIcons  = [Icons.sports_esports, Icons.map, Icons.groups, Icons.settings];
 
   @override
   void initState() {
@@ -142,6 +143,7 @@ class _AppShellState extends State<AppShell> {
     final screens = [
       RemoteScreen(ble: widget.ble, tel: _tel),
       MapScreen(ble: widget.ble, tel: _tel),
+      const CommunityScreen(),
       SettingsScreen(ble: widget.ble, initialPwmHelMin: _pwmHelMin, otaRunning: _otaRunning),
     ];
 
@@ -171,7 +173,7 @@ class _AppShellState extends State<AppShell> {
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(48),
               child: Row(
-                children: List.generate(3, (i) => Expanded(
+                children: List.generate(4, (i) => Expanded(
                   child: InkWell(
                     onTap: () {
                       if (_otaRunning.value) {
@@ -184,7 +186,7 @@ class _AppShellState extends State<AppShell> {
                         return;
                       }
                       setState(() => _selectedIndex = i);
-                      if (i == 2) widget.ble.sendRequestRemotes();
+                      if (i == 3) widget.ble.sendRequestRemotes();
                     },
                     child: Container(
                       height: 48,
