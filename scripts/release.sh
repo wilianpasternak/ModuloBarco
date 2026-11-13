@@ -46,14 +46,26 @@ fi
 
 echo "==> Tamanho do firmware: $(du -h "$BIN" | cut -f1)"
 
+# Confere a assinatura ECDSA: os barcos recusam via OTA firmware nao assinado
+ESPSECURE="$HOME/.platformio/packages/tool-esptool/espsecure"
+if [ ! -x "$ESPSECURE" ]; then
+  echo "ERRO: espsecure nao encontrado em $ESPSECURE"
+  exit 1
+fi
+if ! "$ESPSECURE" verify-signature --version 1 --keyfile pescaplus_signing_key.pem "$BIN" >/dev/null; then
+  echo "ERRO: assinatura do firmware invalida — release cancelada."
+  exit 1
+fi
+echo "==> Assinatura do firmware: OK"
+
 # Cria a release no GitHub e faz upload do .bin
 echo "==> Criando release v$VERSION no GitHub..."
 "$GH" release create "v$VERSION" "$BIN" \
-  --title "Firmware Braga Pesca v$VERSION" \
+  --title "Firmware Pesca Plus v$VERSION" \
   --notes "## Firmware v$VERSION
 
 ### Instalação via OTA
-No app Braga Pesca: **Config → Verificar atualização → Atualizar**
+No app Pesca Plus: **Config → Verificar atualização → Atualizar**
 
 ### Instalação manual
 Use o PlatformIO ou esptool para gravar o \`firmware.bin\` diretamente."

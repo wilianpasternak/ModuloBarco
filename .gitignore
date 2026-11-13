@@ -6,3 +6,13 @@
 
 # Claude Code internals
 .claude/
+
+# ESP-IDF / PlatformIO
+sdkconfig.esp32
+sdkconfig.esp32.old
+managed_components/
+.DS_Store
+
+# Chave PRIVADA de assinatura do firmware — NUNCA commitar
+pescaplus_signing_key.pem
+*.pem

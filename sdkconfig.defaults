@@ -1,0 +1,60 @@
+# ================================================================
+#  PescaPlus — configuracao base do ESP-IDF
+#  ATENCAO: o PlatformIO gera sdkconfig.esp32 a partir deste arquivo
+#  apenas quando ele NAO existe. Ao alterar este arquivo, apague
+#  sdkconfig.esp32 antes de compilar.
+# ================================================================
+
+# --- Flash / particoes ---
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# --- CPU / FreeRTOS ---
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# --- Bluetooth: somente BLE, host NimBLE no nucleo 0 ---
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_PINNED_TO_CORE_0=y
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=512
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=24
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+
+# --- OTA: rollback automatico no bootloader ---
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- OTA assinado (ECDSA P-256) sem Secure Boot ---
+# O app so aceita, via OTA, imagens assinadas com pescaplus_signing_key.pem.
+# A chave publica e extraida dessa chave e embutida no app (scripts/sign_firmware.py).
+# A assinatura em si e feita pelo script (o PlatformIO nao assina sem Secure Boot).
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="pescaplus_signing_key.pem"
+
+# --- Watchdog: reinicia se a task de controle travar ---
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=3
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# --- Core dump desligado (era -DCONFIG_ESP_COREDUMP_ENABLE_TO_NONE) ---
+CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
+
+# --- Log (troque para DEBUG para ver a depuracao detalhada) ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
