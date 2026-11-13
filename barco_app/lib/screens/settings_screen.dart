@@ -32,6 +32,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _sliderCalibPwm  = 64.0;  // (160-100)/100*90+10
   double _sliderUsoPwm    = 91.3;  // (240-100)/155*90+10
 
+  // Estado da bússola ($BSC)
+  int _compassState = -1;
+  StreamSubscription? _compassSub;
+
+  // Ganhos da âncora (opções avançadas)
+  AnchorGains _anchorGains = AnchorGains.defaults;
+  StreamSubscription? _anchorGainsSub;
+
   // Incremento de aceleração (fora da senha)
   double _aceleracaoIncremento = 5.0;
 
@@ -46,6 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _latestVersion;
   String? _otaUrl;
   double? _otaProgress;
+  String? _otaStatus;
 
   // Conversões PWM ↔ percentual
   double _pwmToCalibPct(int pwm) => (pwm - 100) / 100.0 * 90.0 + 10.0;
@@ -68,12 +77,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _sliderUsoPwm         = _pwmToUsoPct(cfg.usoPwmGiro);
       _aceleracaoIncremento = cfg.aceleracaoIncremento.toDouble();
     }));
+    _anchorGainsSub = widget.ble.anchorGainsStream.listen((g) => setState(() => _anchorGains = g));
+    _compassState = widget.ble.compassState;
+    _compassSub = widget.ble.compassStateStream.listen((v) => setState(() => _compassState = v));
     widget.ble.sendRequestAdvancedConfig();
   }
 
   @override
   void dispose() {
     _hmnSub?.cancel();
+    _anchorGainsSub?.cancel();
+    _compassSub?.cancel();
     _buzzerSub?.cancel();
     _remotesSub?.cancel();
     _hofSub?.cancel();
@@ -205,7 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: _kPanel,
         title: const Text('Calibrar Bússola', style: TextStyle(color: _kGold)),
         content: const Text(
-          'O motor vai girar 360° para cada lado durante ~20 segundos.\n\nCertifique-se de que o barco esteja na água e com espaço livre.',
+          'O motor vai girar para cada lado para calibrar e depois dar 1,5 volta para cada lado para verificar a calibração (cerca de 1 minuto).\n\nCertifique-se de que o barco esteja na água, com espaço livre e longe de estruturas metálicas.',
           style: TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -226,14 +240,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await widget.ble.sendCalibrate();
     if (!mounted) return;
 
-    showDialog(
+    // O diálogo acompanha as etapas enviadas pelo motor ($CAL:1/2/OK/ERR)
+    await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const _CalibrationProgressDialog(),
+      builder: (_) => _CalibrationProgressDialog(
+          stream: widget.ble.calibrationStream, calibTimeSeg: _calibTimeSeg),
     );
-
-    await Future.delayed(const Duration(seconds: 22));
-    if (mounted) Navigator.of(context, rootNavigator: true).pop();
   }
 
   Future<void> _checkForUpdate() async {
@@ -277,21 +290,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
     widget.otaRunning?.value = true;
-    setState(() => _otaProgress = 0.0);
-    final ok = await widget.ble.performOta(_otaUrl!, (p) {
-      if (mounted) setState(() => _otaProgress = p);
-    });
-    setState(() => _otaProgress = null);
+    setState(() { _otaProgress = 0.0; _otaStatus = 'Iniciando...'; });
+    final result = await widget.ble.performOta(
+      _otaUrl!,
+      _latestVersion!,
+      onProgress: (p) { if (mounted) setState(() => _otaProgress = p); },
+      onStatus: (st) { if (mounted) setState(() => _otaStatus = st); },
+    );
     widget.otaRunning?.value = false;
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Firmware atualizado! O motor está reiniciando...'
-            : 'Falha na atualização. Tente novamente.'),
-      ));
-    }
+    if (!mounted) return;
+    setState(() { _otaProgress = null; _otaStatus = null; });
+    // Se a atualização falhou no meio e a conexão caiu, tenta voltar sozinho
+    if (!widget.ble.isConnected) widget.ble.reconnect();
+    await showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _kPanel,
+        title: Row(children: [
+          Icon(result.success ? Icons.check_circle : Icons.error,
+              color: result.success ? Colors.green.shade400 : Colors.red.shade400),
+          const SizedBox(width: 10),
+          Expanded(child: Text(
+            result.success ? 'Atualização concluída' : 'Atualização não concluída',
+            style: const TextStyle(color: _kGold))),
+        ]),
+        content: Text(result.message, style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: _kGold)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -337,6 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   final ok = await _showPasswordDialog();
                   if (!ok || !mounted) return;
                   await widget.ble.sendRequestAdvancedConfig();
+                  await widget.ble.sendRequestAnchorGains();
                   setState(() => _advancedVisible = true);
                 }
               },
@@ -473,6 +507,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: Text('${_sliderUsoPwm.round()}%',
                         style: const TextStyle(
                             color: _kGold, fontWeight: FontWeight.bold)),
+                  ),
+
+                  const SizedBox(height: 20),
+                  Divider(color: _kGoldDim.withValues(alpha: 0.3), height: 1),
+                  const SizedBox(height: 16),
+
+                  // ── D) Âncora — ajuste fino ───────────────────────
+                  const Text('Âncora — Ajuste Fino',
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  const Text(
+                      'Força: quanto o motor empurra por metro fora do ponto. '
+                      'Correção: rapidez para aprender vento/correnteza. '
+                      'Freio: quanto reduz o empuxo ao se aproximar. '
+                      'Se o barco passar do ponto, aumente o Freio ou reduza a Força.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  const SizedBox(height: 8),
+                  _GainSlider(
+                    label: 'Força (Kp)', value: _anchorGains.kp, min: 0, max: 100, divisions: 100,
+                    onChanged: (v) => setState(() => _anchorGains =
+                        AnchorGains(kp: v, ki: _anchorGains.ki, kd: _anchorGains.kd)),
+                    onChangeEnd: (v) => widget.ble.sendAnchorKp(v),
+                  ),
+                  _GainSlider(
+                    label: 'Correção (Ki)', value: _anchorGains.ki, min: 0, max: 20, divisions: 40,
+                    onChanged: (v) => setState(() => _anchorGains =
+                        AnchorGains(kp: _anchorGains.kp, ki: v, kd: _anchorGains.kd)),
+                    onChangeEnd: (v) => widget.ble.sendAnchorKi(v),
+                  ),
+                  _GainSlider(
+                    label: 'Freio (Kd)', value: _anchorGains.kd, min: 0, max: 150, divisions: 30,
+                    onChanged: (v) => setState(() => _anchorGains =
+                        AnchorGains(kp: _anchorGains.kp, ki: _anchorGains.ki, kd: v)),
+                    onChangeEnd: (v) => widget.ble.sendAnchorKd(v),
+                  ),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: () => widget.ble.sendAnchorGainsReset(),
+                      icon: const Icon(Icons.restart_alt, color: _kGoldDim, size: 18),
+                      label: const Text('Restaurar padrão',
+                          style: TextStyle(color: _kGoldDim, fontSize: 12)),
+                    ),
                   ),
                 ],
               ),
@@ -698,10 +774,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: Colors.white70, fontSize: 13)),
                 const SizedBox(height: 4),
                 const Text(
-                  'Realiza a calibração do magnetômetro HMC5883L. '
-                  'O motor girará 360° para cada lado. Execute com o barco na água.',
+                  'Obrigatória com o motor instalado: sem ela a âncora, o norte e o aponta-norte '
+                  'ficam bloqueados. O motor gira para cada lado e depois verifica a calibração. '
+                  'Execute com o barco na água, longe de estruturas metálicas.',
                   style: TextStyle(color: Colors.white38, fontSize: 11),
                 ),
+                const SizedBox(height: 8),
+                _CompassStateChip(state: _compassState),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -938,11 +1017,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 12),
           if (_otaProgress != null)
             Column(children: [
-              LinearProgressIndicator(value: _otaProgress, color: _kGold,
+              if (_otaStatus != null) ...[
+                Text(_otaStatus!, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 8),
+              ],
+              LinearProgressIndicator(
+                  // Indeterminado fora do envio (reinício, reconexão, validação)
+                  value: _otaStatus == 'Enviando firmware...' ? _otaProgress : null,
+                  color: _kGold,
                   backgroundColor: _kGoldDim.withValues(alpha: 0.3)),
               const SizedBox(height: 8),
-              Text('${((_otaProgress ?? 0) * 100).toStringAsFixed(0)}%',
-                  style: const TextStyle(color: _kGold, fontSize: 13)),
+              if (_otaStatus == 'Enviando firmware...')
+                Text('${((_otaProgress ?? 0) * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(color: _kGold, fontSize: 13)),
             ])
           else
             Row(children: [
@@ -1077,6 +1164,65 @@ class _OffsetBtn extends StatelessWidget {
 
 // ── Gold outline button ───────────────────────────────────────────────────────
 // ── Advanced +/- button (spinner) ────────────────────────────────────────────
+class _CompassStateChip extends StatelessWidget {
+  final int state;
+  const _CompassStateChip({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final (IconData icon, Color color, String text) = switch (state) {
+      1 => (Icons.check_circle, Colors.green.shade400, 'Bússola calibrada'),
+      0 => (Icons.warning_amber, Colors.orange.shade400, 'Bússola NÃO calibrada'),
+      2 => (Icons.error, Colors.red.shade400, 'Calibração inválida — recalibre'),
+      3 => (Icons.error, Colors.red.shade400, 'Bússola não encontrada'),
+      _ => (Icons.help_outline, Colors.white38, 'Estado da bússola desconhecido'),
+    };
+    return Row(children: [
+      Icon(icon, color: color, size: 16),
+      const SizedBox(width: 6),
+      Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+    ]);
+  }
+}
+
+class _GainSlider extends StatelessWidget {
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int divisions;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+  const _GainSlider({
+    required this.label, required this.value, required this.min, required this.max,
+    required this.divisions, required this.onChanged, required this.onChangeEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = value == value.roundToDouble()
+        ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
+    return Row(children: [
+      SizedBox(width: 96,
+          child: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12))),
+      Expanded(
+        child: Slider(
+          value: value.clamp(min, max),
+          min: min, max: max, divisions: divisions,
+          activeColor: _kGold,
+          inactiveColor: _kGoldDim.withValues(alpha: 0.3),
+          label: text,
+          onChanged: onChanged,
+          onChangeEnd: onChangeEnd,
+        ),
+      ),
+      SizedBox(width: 36,
+          child: Text(text, textAlign: TextAlign.right,
+              style: const TextStyle(color: _kGold, fontWeight: FontWeight.bold))),
+    ]);
+  }
+}
+
 class _AdvBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onPressed;
@@ -1130,7 +1276,9 @@ class _GoldOutlineBtn extends StatelessWidget {
 
 // ── Calibration progress dialog ───────────────────────────────────────────────
 class _CalibrationProgressDialog extends StatefulWidget {
-  const _CalibrationProgressDialog();
+  final Stream<String> stream;
+  final int calibTimeSeg;
+  const _CalibrationProgressDialog({required this.stream, required this.calibTimeSeg});
 
   @override
   State<_CalibrationProgressDialog> createState() => _CalibrationProgressDialogState();
@@ -1139,25 +1287,98 @@ class _CalibrationProgressDialog extends StatefulWidget {
 class _CalibrationProgressDialogState extends State<_CalibrationProgressDialog> {
   int _elapsed = 0;
   Timer? _timer;
+  StreamSubscription<String>? _sub;
+  String _stage = '1';        // 1 = calibrando, 2 = verificando
+  bool? _ok;                  // resultado final
+  String _message = '';
+
+  // Calibração (2 lados + pausas) e verificação (1,5 volta para cada lado)
+  int get _expected => widget.calibTimeSeg * 2 + 3 + 30;
 
   @override
   void initState() {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _elapsed++);
+      if (!mounted || _ok != null) return;
+      setState(() => _elapsed++);
+      // Sem resposta do motor bem depois do esperado
+      if (_elapsed > _expected + 60) {
+        _finish(false, 'O motor não informou o resultado. Verifique a conexão e repita a calibração.');
+      }
     });
+    _sub = widget.stream.listen((ev) {
+      if (!mounted) return;
+      if (ev == '1' || ev == '2') {
+        setState(() => _stage = ev);
+      } else if (ev == 'OK') {
+        _finish(true, 'Calibração aplicada e verificada: o rumo foi lido nos 360°, sem falhas.');
+      } else if (ev.startsWith('ERR:')) {
+        _finish(false, _errorText(ev.substring(4)));
+      }
+    });
+  }
+
+  void _finish(bool ok, String msg) {
+    _timer?.cancel();
+    setState(() { _ok = ok; _message = msg; });
+  }
+
+  static String _errorText(String code) {
+    final keep = '\n\nA calibração anterior foi mantida.';
+    final lado = code.contains('_esq') ? ' (giro para a esquerda)' : code.contains('_dir') ? ' (giro para a direita)' : '';
+    if (code.startsWith('sem_leituras')) {
+      return 'A bússola não registrou variação suficiente. O motor girou de verdade? Confira a ligação da bússola.$keep';
+    }
+    if (code.startsWith('eixos_desproporcionais')) {
+      return 'Leituras muito distorcidas. Afaste peças metálicas da cabeça do motor e repita.$keep';
+    }
+    if (code.startsWith('giro_incompleto')) {
+      return 'O motor não completou a volta e meia de verificação$lado. Verifique se o giro está livre (cabo, obstáculo).$keep';
+    }
+    if (code.startsWith('setores')) {
+      return 'Ainda existem faixas do rumo sem leitura$lado. Repita a calibração com o motor girando livremente.$keep';
+    }
+    if (code.startsWith('saltos')) {
+      return 'O rumo deu saltos durante a volta$lado: a bússola não está bem calibrada. Repita a calibração.$keep';
+    }
+    if (code.startsWith('campo_irregular')) {
+      return 'A intensidade do campo variou demais na volta$lado: há interferência magnética (metal próximo, cabos de potência). Repita longe de estruturas metálicas.$keep';
+    }
+    return 'Falha na calibração ($code).$keep';
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _sub?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final progress = (_elapsed / 22.0).clamp(0.0, 1.0);
-    final phase = _elapsed < 11 ? 'Girando esquerda...' : 'Girando direita...';
+    if (_ok != null) {
+      return AlertDialog(
+        backgroundColor: _kPanel,
+        title: Row(children: [
+          Icon(_ok! ? Icons.check_circle : Icons.error,
+              color: _ok! ? Colors.green.shade400 : Colors.red.shade400),
+          const SizedBox(width: 10),
+          Expanded(child: Text(_ok! ? 'Bússola calibrada' : 'Calibração reprovada',
+              style: const TextStyle(color: _kGold))),
+        ]),
+        content: Text(_message, style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK', style: TextStyle(color: _kGold)),
+          ),
+        ],
+      );
+    }
+    final progress = (_elapsed / _expected).clamp(0.0, 0.97);
+    final phase = _stage == '2'
+        ? 'Verificando: 1,5 volta para cada lado...'
+        : 'Calibrando: girando para cada lado...';
     return AlertDialog(
       backgroundColor: _kPanel,
       title: const Text('Calibrando Bússola', style: TextStyle(color: _kGold)),
@@ -1174,7 +1395,7 @@ class _CalibrationProgressDialogState extends State<_CalibrationProgressDialog> 
             borderRadius: BorderRadius.circular(4),
           ),
           const SizedBox(height: 8),
-          Text('${_elapsed}s / 22s', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          Text('${_elapsed}s', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         ],
       ),
     );

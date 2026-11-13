@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/ble_service.dart';
 import '../models/telemetry.dart';
 
-// Paleta dourada — espelha o controle físico Braga Pesca
+// Paleta dourada — espelha o controle físico Pesca Plus
 const _kGold    = Color(0xFFD4A800);
 const _kGoldDim = Color(0xFF6B5400);
 const _kPanel   = Color(0xFF1A1A10);
@@ -143,8 +143,20 @@ class _RemoteScreenState extends State<RemoteScreen> {
     await widget.ble.sendToggleAnchor();
   }
 
+  AnchorStatus? _anchorStatus;
+  StreamSubscription? _anchorSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _anchorSub = widget.ble.anchorStatusStream.listen((st) {
+      if (mounted) setState(() => _anchorStatus = st);
+    });
+  }
+
   @override
   void dispose() {
+    _anchorSub?.cancel();
     _acelTimer?.cancel();
     _giroTimer?.cancel();
     _upDownTimer?.cancel();
@@ -165,6 +177,10 @@ class _RemoteScreenState extends State<RemoteScreen> {
         children: [
           // ── Telemetria ───────────────────────────────────────────
           _StatusBar(tel: tel),
+          if (anchorActive && _anchorStatus != null) ...[
+            const SizedBox(height: 10),
+            _AnchorStatusCard(st: _anchorStatus!),
+          ],
           const SizedBox(height: 20),
 
           // ══════════════════════════════════════════════════════════
@@ -553,6 +569,59 @@ class _CircleHoldBtnState extends State<_CircleHoldBtn> {
 }
 
 // ── Status bar ───────────────────────────────────────────────────────────────
+/// Estado da âncora: distância ao ponto, força contra a correnteza e GPS.
+class _AnchorStatusCard extends StatelessWidget {
+  final AnchorStatus st;
+  const _AnchorStatusCard({required this.st});
+
+  static String _cardinal(double deg) {
+    const names = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
+    return names[((deg % 360) / 45).round() % 8];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (st.gpsLost) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.red.shade900.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.red.shade400, width: 1.5),
+        ),
+        child: const Row(children: [
+          Icon(Icons.gps_off, color: Colors.white),
+          SizedBox(width: 10),
+          Expanded(child: Text('SEM GPS — hélice parada. A âncora retoma sozinha quando o sinal voltar.',
+              style: TextStyle(color: Colors.white, fontSize: 12))),
+        ]),
+      );
+    }
+    final hold = (st.holdPwm / 255 * 100).round();
+    final gpsGood = st.hdop <= 2.0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: _kPanel,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _kGoldDim, width: 1.5),
+      ),
+      child: Row(children: [
+        _Stat(icon: Icons.anchor, label: 'Do ponto',
+            value: '${st.distance.toStringAsFixed(1)} m'),
+        _Div(),
+        _Stat(icon: Icons.waves, label: 'Correnteza',
+            value: hold < 3 ? '—' : '$hold% → ${_cardinal(st.holdDir + 180)}'),
+        _Div(),
+        _Stat(icon: Icons.my_location, label: 'Precisão GPS',
+            value: st.hdop >= 99 ? '--' : '±${(st.hdop * 1.5).toStringAsFixed(1)} m',
+            valueColor: gpsGood ? Colors.green.shade400 : Colors.orange.shade400),
+      ]),
+    );
+  }
+}
+
 class _StatusBar extends StatelessWidget {
   final Telemetry? tel;
   const _StatusBar({required this.tel});

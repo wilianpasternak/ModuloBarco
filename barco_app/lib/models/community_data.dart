@@ -114,7 +114,7 @@ final mockRanking = <RankingEntry>[
 
 final mockTournaments = <Tournament>[
   Tournament(
-    name: 'Torneio de Verão Braga Pesca',
+    name: 'Torneio de Verão Pesca Plus',
     date: DateTime(2026, 12, 5),
     location: 'Represa de Ibitinga - SP',
     status: 'Inscrições abertas',

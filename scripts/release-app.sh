@@ -35,7 +35,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 TAG="app-v$VERSION"
-echo "==> App Braga Pesca — versão $VERSION  (tag: $TAG)"
+echo "==> App Pesca Plus — versão $VERSION  (tag: $TAG)"
 
 # ── Verifica mudanças não comitadas ───────────────────────────────────────────
 if ! git diff --quiet || ! git diff --staged --quiet; then

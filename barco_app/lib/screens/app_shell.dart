@@ -30,9 +30,14 @@ class _AppShellState extends State<AppShell> {
   StreamSubscription? _connSub;
   StreamSubscription? _hmnSub;
   StreamSubscription? _batSub;
+  StreamSubscription? _giroSub;
+  StreamSubscription? _compassSub;
+  int _lastCompassState = -1;
+  bool _lastCompassStateWasBad = false;
   bool _isConnected = true;
   bool _isReconnecting = false;
   bool _manualDisconnect = false;
+  bool _autoReconnecting = false;
   int _pwmHelMin = 0;
   BatteryInfo? _battery;
   final _otaRunning = ValueNotifier<bool>(false);
@@ -48,6 +53,38 @@ class _AppShellState extends State<AppShell> {
     _connSub = widget.ble.connectionStream.listen(_onConnectionChange);
     _hmnSub  = widget.ble.pwmHelMinStream.listen((v) => setState(() => _pwmHelMin = v));
     _batSub  = widget.ble.batteryStream.listen((b) => setState(() => _battery = b));
+    _compassSub = widget.ble.compassStateStream.listen((st) {
+      if (!mounted) return;
+      final changed = st != _lastCompassState;
+      _lastCompassState = st;
+      switch (st) {
+        case 0:
+          _showSnack('Bússola não calibrada: âncora, norte e aponta-norte ficam bloqueados. '
+              'Calibre em Config → Calibrar Bússola.', Colors.orange.shade800, seconds: 6);
+          break;
+        case 2:
+          _showSnack('Calibração da bússola inválida (interferência magnética ou motor reinstalado). '
+              'Modos automáticos desligados — recalibre a bússola.', Colors.red, seconds: 7);
+          break;
+        case 3:
+          _showSnack('Bússola não encontrada: verifique a ligação. Modos automáticos bloqueados.',
+              Colors.red, seconds: 6);
+          break;
+        case 1:
+          if (changed && _lastCompassStateWasBad) _showSnack('Bússola OK.', Colors.green.shade700);
+          break;
+      }
+      _lastCompassStateWasBad = st != 1;
+    });
+    _giroSub = widget.ble.giroStalledStream.listen((stalled) {
+      if (!mounted) return;
+      if (stalled) {
+        _showSnack('Motor de giro travado: o motor não consegue girar (cabo enroscado, '
+            'obstáculo ou mato na hélice). Nova tentativa em 5 s.', Colors.red, seconds: 6);
+      } else {
+        _showSnack('Motor de giro voltou a girar.', Colors.green.shade700);
+      }
+    });
     _otaRunning.addListener(() { if (mounted) setState(() {}); });
     if (widget.autoReconnect) {
       _scheduleReconnect();
@@ -78,13 +115,37 @@ class _AppShellState extends State<AppShell> {
       _isConnected = connected;
       if (!connected) _tel = null;
     });
-    if (!connected) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Conexão com o motor perdida',
-            style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.red.withValues(alpha: 0.85),
-      ));
+    // Durante o OTA o próprio fluxo de atualização cuida da reconexão
+    if (!connected && !widget.ble.otaInProgress && !_isReconnecting) {
+      _autoReconnect();
     }
+  }
+
+  /// Queda inesperada: tenta reconectar sozinho, sem bloquear a tela.
+  Future<void> _autoReconnect() async {
+    if (_autoReconnecting) return;
+    _autoReconnecting = true;
+    _showSnack('Conexão com o motor perdida — reconectando...', Colors.orange);
+    final ok = await widget.ble.reconnect(timeout: const Duration(seconds: 60));
+    _autoReconnecting = false;
+    if (!mounted) return;
+    if (ok) {
+      setState(() => _isConnected = true);
+      _showSnack('Reconectado ao motor.', Colors.green.shade700);
+    } else if (!widget.ble.isConnected) {
+      _showSnack('Motor não encontrado. Toque no ícone de conexão para tentar novamente.',
+          Colors.red, seconds: 5);
+    }
+  }
+
+  void _showSnack(String text, Color color, {int seconds = 3}) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(text, style: const TextStyle(color: Colors.white)),
+      backgroundColor: color.withValues(alpha: 0.9),
+      duration: Duration(seconds: seconds),
+    ));
   }
 
   Future<void> _disconnect() async {
@@ -104,27 +165,12 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     if (mounted) setState(() => _isReconnecting = true);
-    try {
-      final known = FlutterBluePlus.connectedDevices;
-      BluetoothDevice? target;
-      for (final d in known) {
-        if (d.remoteId.str == savedId) { target = d; break; }
-      }
-      target ??= BluetoothDevice(remoteId: DeviceIdentifier(savedId));
-      await widget.ble.connect(target);
-      if (mounted) setState(() { _isConnected = true; _isReconnecting = false; });
-    } catch (_) {
-      if (mounted) {
-        setState(() { _isReconnecting = false; _isConnected = false; });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text(
-            'Motor não encontrado. Verifique se está ligado e toque em wifi para tentar novamente.',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Colors.red.withValues(alpha: 0.85),
-          duration: const Duration(seconds: 5),
-        ));
-      }
+    final ok = await widget.ble.reconnect(timeout: const Duration(seconds: 15));
+    if (!mounted) return;
+    setState(() { _isReconnecting = false; _isConnected = ok; });
+    if (!ok) {
+      _showSnack('Motor não encontrado. Verifique se está ligado e toque no ícone de conexão para tentar novamente.',
+          Colors.red, seconds: 5);
     }
   }
 
@@ -134,6 +180,8 @@ class _AppShellState extends State<AppShell> {
     _connSub?.cancel();
     _hmnSub?.cancel();
     _batSub?.cancel();
+    _giroSub?.cancel();
+    _compassSub?.cancel();
     _otaRunning.dispose();
     super.dispose();
   }
@@ -233,7 +281,7 @@ class _AppShellState extends State<AppShell> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Image.asset('assets/logo_braga_pesca.png', height: 70),
+                    Image.asset('assets/logo_pescaplus.png', height: 70),
                     const SizedBox(height: 20),
                     const CircularProgressIndicator(color: _kGold),
                     const SizedBox(height: 16),

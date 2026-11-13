@@ -37,11 +37,11 @@ class _ScanScreenState extends State<ScanScreen> {
     ].request();
   }
 
-  String _deviceName(ScanResult r) {
-    if (r.device.platformName.isNotEmpty) return r.device.platformName;
-    if (r.advertisementData.advName.isNotEmpty) return r.advertisementData.advName;
-    return '';
-  }
+  // Confere o nome anunciado e o nome em cache do sistema: o iOS pode manter
+  // o nome antigo de um aparelho já pareado até a próxima conexão.
+  bool _isPescaPlus(ScanResult r) =>
+      r.advertisementData.advName == kDeviceName ||
+      r.device.platformName == kDeviceName;
 
   Future<void> _startScan() async {
     setState(() { _bleError = null; _results.clear(); _scanning = true; _scanDone = false; });
@@ -68,7 +68,7 @@ class _ScanScreenState extends State<ScanScreen> {
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         for (final r in results) {
-          if (_deviceName(r) != 'BragaPesca') continue;
+          if (!_isPescaPlus(r)) continue;
           if (!_results.any((e) => e.device.remoteId == r.device.remoteId)) {
             _results.add(r);
           }
@@ -162,7 +162,7 @@ class _ScanScreenState extends State<ScanScreen> {
       body: Column(
         children: [
           const SizedBox(height: 32),
-          Image.asset('assets/logo_braga_pesca.png', height: 110),
+          Image.asset('assets/logo_pescaplus.png', height: 110),
           const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: _scanning ? null : _startScan,
